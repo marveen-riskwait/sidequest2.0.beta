@@ -1,7 +1,8 @@
+from datetime import datetime
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import String, Boolean, Float, ForeignKey, Table, Column, Text
+from sqlalchemy import String, Boolean, Float, ForeignKey, Table, Column, Text, DateTime, UniqueConstraint, CheckConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-
+ 
 db = SQLAlchemy()
 
 # ── Association table for event participants ─────────────
@@ -61,3 +62,54 @@ class Event(db.Model):
             "participants":       [{"id": p.id, "email": p.email} for p in self.participants],
             "participants_count": len(self.participants),
         }
+
+
+
+# ── FRIENDSHIP ────────────────────────────────────────────
+# A single row represents a directed request from `requester_id`
+# to `addressee_id`. Status transitions:
+#   pending  -> accepted   (addressee accepts)
+#   pending  -> refused    (addressee refuses; row stays for history)
+#   accepted -> (deleted)  (either side removes the friendship)
+class Friendship(db.Model):
+    __tablename__ = "friendship"
+ 
+    id:           Mapped[int] = mapped_column(primary_key=True)
+    requester_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False, index=True)
+    addressee_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False, index=True)
+    status:       Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    created_at:   Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at:   Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+ 
+    requester: Mapped["User"] = relationship("User", foreign_keys=[requester_id])
+    addressee: Mapped["User"] = relationship("User", foreign_keys=[addressee_id])
+ 
+    __table_args__ = (
+        UniqueConstraint("requester_id", "addressee_id", name="uq_friendship_pair"),
+        CheckConstraint("requester_id <> addressee_id", name="ck_friendship_not_self"),
+        CheckConstraint(
+            "status IN ('pending', 'accepted', 'refused')",
+            name="ck_friendship_status",
+        ),
+    )
+ 
+    def serialize(self, current_user_id=None):
+        # When current_user_id is supplied, also expose the "other" user
+        # so the client can render the friend without extra lookups.
+        data = {
+            "id":           self.id,
+            "requester_id": self.requester_id,
+            "addressee_id": self.addressee_id,
+            "status":       self.status,
+            "created_at":   self.created_at.isoformat() if self.created_at else None,
+            "updated_at":   self.updated_at.isoformat() if self.updated_at else None,
+            "requester":    {"id": self.requester.id, "email": self.requester.email} if self.requester else None,
+            "addressee":    {"id": self.addressee.id, "email": self.addressee.email} if self.addressee else None,
+        }
+        if current_user_id is not None:
+            other = self.addressee if self.requester_id == current_user_id else self.requester
+            data["friend"]    = {"id": other.id, "email": other.email} if other else None
+            data["direction"] = "outgoing" if self.requester_id == current_user_id else "incoming"
+        return data

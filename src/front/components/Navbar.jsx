@@ -18,8 +18,48 @@ import {
     FiMenu,
     FiMail,
     FiX,
-    FiSend
+    FiSend,
+    FiUsers
 } from "react-icons/fi";
+
+// =====================================================
+// LOCAL HELPERS (inlined so the navbar is self-contained)
+// =====================================================
+const API = import.meta.env.VITE_BACKEND_URL;
+
+const authHeaders = () => ({
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${localStorage.getItem("token")}`,
+});
+
+// Safe getChatRooms: never throws, returns [] when the endpoint is unavailable.
+const getChatRooms = async (dispatch) => {
+    try {
+        const res = await fetch(`${API}/api/chat/rooms`, { headers: authHeaders() });
+        if (!res.ok) return;
+        const rooms = await res.json();
+        dispatch({ type: "set_chat_rooms", payload: rooms });
+    } catch (_) {
+        // chat endpoint not implemented yet — fail quietly
+    }
+};
+
+const sendChatMessage = async (dispatch, roomId, text) => {
+    const res = await fetch(`${API}/api/chat/rooms/${roomId}/messages`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ text }),
+    });
+    if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.msg || "Failed to send message");
+    }
+    return res.json();
+};
+
+const logout = (dispatch) => {
+    dispatch({ type: "logout" });
+};
 
 export const Navbar = () => {
     const navigate = useNavigate();
@@ -37,10 +77,10 @@ export const Navbar = () => {
     // =====================================================
 
     useEffect(() => {
-        if (store.token) {
+        if (localStorage.getItem("token")) {
             getChatRooms(dispatch);
         }
-    }, [store.token]);
+    }, []);
 
     // =====================================================
     // LOGOUT
@@ -135,6 +175,25 @@ export const Navbar = () => {
                                         )?.email
                                     }
                                 </span>
+
+                                <Link
+                                    to="/friends"
+                                    className="text-decoration-none"
+                                    title="Friends"
+                                >
+                                    <Button
+                                        variant="dark"
+                                        className="border-0 d-flex align-items-center gap-1"
+                                    >
+                                        <FiUsers
+                                            size={24}
+                                            color="white"
+                                        />
+                                        <span className="text-light d-none d-md-inline small">
+                                            Friends
+                                        </span>
+                                    </Button>
+                                </Link>
 
                                 <NotificationBell />
 
