@@ -1,15 +1,17 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { MapContainer, TileLayer, Marker } from "react-leaflet";
+import { Container, Spinner, Alert } from "react-bootstrap";
 import "leaflet/dist/leaflet.css";
 
 import { createMarkerAvatar } from "./MarkerAvatar";
 import MapClickHandler from "./MapClickHandler";
 import { EventModal } from "./EventModal";
+import "./mapview.css";
 
-// Fallback par défaut : Madrid
+// Fallback por defecto: Madrid
 const MADRID = [40.4168, -3.7038];
 
-// Distance haversine en km entre deux [lat, lng]
+// Distancia haversine en km entre dos [lat, lng]
 const haversine = (a, b) => {
   const R = 6371;
   const toRad = (x) => (x * Math.PI) / 180;
@@ -23,12 +25,7 @@ const haversine = (a, b) => {
   return 2 * R * Math.asin(Math.sqrt(h));
 };
 
-/**
- * Priority chain for the map center:
- *   1. The user's GPS position (`center` prop).
- *   2. The event closest to Madrid (best proxy when no user location).
- *   3. Madrid as the absolute fallback.
- */
+// Prioridad del centro: GPS del usuario > evento mas cercano a Madrid > Madrid
 const computeCenter = (center, events) => {
   if (center) return center;
 
@@ -46,37 +43,84 @@ const computeCenter = (center, events) => {
 };
 
 /**
- * Mapview is now self-contained: it owns the EventModal.
- *   - click on empty area  -> opens EventModal in create mode (prefilled coords)
- *   - click on existing marker -> opens EventModal in view/edit mode
+ * Mapview: vista de mapa autosuficiente. Asume todas las responsabilidades
+ * que antes vivian en pages/Map.jsx:
+ *   - fetch de /api/events
+ *   - geolocalizacion del usuario
+ *   - estado de loading / error
+ *   - apertura del EventModal (crear al clicar mapa vacio, ver/editar al
+ *     clicar un marker existente)
  *
- * Optional props (forwarded callbacks for the parent to react if needed):
- *   onMapClick(coords)     -> still fired after the modal opens
- *   onMarkerClick(event)   -> still fired after the modal opens
- *   onSaved(eventOrNull)   -> called after a create/update finishes
+ * Props opcionales para que el padre reaccione (no son obligatorias):
+ *   onMapClick(coords)     -> se dispara despues de abrir el modal de creacion
+ *   onMarkerClick(event)   -> se dispara despues de abrir el modal de un evento
+ *   onSaved(eventOrNull)   -> se dispara tras un guardado del EventModal
  */
-export const Mapview = ({
-  events = [],
-  center,
-  onMapClick,
-  onMarkerClick,
-  onSaved = () => {},
-}) => {
-  const mapCenter = useMemo(
-    () => computeCenter(center, events),
-    [center, events]
-  );
+export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
+  // ── datos ──────────────────────────────────────────
+  const [events, setEvents]         = useState([]);
+  const [loading, setLoading]       = useState(true);
+  const [error, setError]           = useState(null);
+  const [userCenter, setUserCenter] = useState(null);
 
-  // ── internal modal state ──────────────────────────
+  // ── modal interno ─────────────────────────────────
   const [modalOpen, setModalOpen]         = useState(false);
-  const [activeEventId, setActiveEventId] = useState(null);
+  const [activeEventId, setActiveEventId] = useState(null); // null => crear
   const [prefillCoords, setPrefillCoords] = useState(null);
 
   const currentUser = JSON.parse(localStorage.getItem("user") || "null");
 
+  // ── fetch events ──────────────────────────────────
+  const fetchEvents = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const apiUrl = import.meta.env.VITE_BACKEND_URL;
+      const token  = localStorage.getItem("token");
+
+      if (!apiUrl) throw new Error("Falta VITE_BACKEND_URL en el .env del frontend");
+
+      const res = await fetch(`${apiUrl}/api/events`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error("Failed to fetch events");
+
+      const data = await res.json();
+      const normalized = data
+        .filter((e) => e.latitude != null && e.longitude != null)
+        .map((e) => ({ ...e, position: [e.latitude, e.longitude] }));
+
+      setEvents(normalized);
+    } catch (err) {
+      setError(err.message);
+      console.error("Error fetching events:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchEvents();
+
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => setUserCenter([pos.coords.latitude, pos.coords.longitude]),
+        () => {
+          /* permiso denegado o no disponible: usamos fallback */
+        },
+        { timeout: 5000 }
+      );
+    }
+  }, []);
+
+  const mapCenter = useMemo(
+    () => computeCenter(userCenter, events),
+    [userCenter, events]
+  );
+
   // ── handlers ──────────────────────────────────────
   const handleMapClick = (coords) => {
-    console.log("[Mapview] open create modal at", coords);
     setActiveEventId(null);
     setPrefillCoords(coords);
     setModalOpen(true);
@@ -84,7 +128,6 @@ export const Mapview = ({
   };
 
   const handleMarkerClick = (event) => {
-    console.log("[Mapview] open existing event", event.id);
     setActiveEventId(event.id);
     setPrefillCoords(null);
     setModalOpen(true);
@@ -97,8 +140,26 @@ export const Mapview = ({
     setPrefillCoords(null);
   };
 
+  const handleSaved = (eventOrNull) => {
+    fetchEvents();
+    onSaved && onSaved(eventOrNull);
+  };
+
+  // ── render ────────────────────────────────────────
   return (
-    <>
+    <Container fluid className="map-page p-0">
+      {loading && (
+        <div className="text-center py-3">
+          <Spinner animation="border" size="sm" />
+        </div>
+      )}
+
+      {error && (
+        <Alert variant="danger" className="m-3">
+          {error}
+        </Alert>
+      )}
+
       <div
         className="sq-map-wrapper"
         style={{ height: "calc(100vh - 56px - 64px)", width: "100%" }}
@@ -111,15 +172,10 @@ export const Mapview = ({
         >
           <TileLayer
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            attribution="OpenStreetMap"
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           />
 
-          <MapClickHandler
-            onMapClick={(coords) => {
-              console.debug("[Mapview] map click", coords);
-              handleMapClick(coords);
-            }}
-          />
+          <MapClickHandler onMapClick={handleMapClick} />
 
           {events.map((event) => (
             <Marker
@@ -127,10 +183,7 @@ export const Mapview = ({
               position={event.position}
               icon={createMarkerAvatar(event.image)}
               eventHandlers={{
-                click: () => {
-                  console.debug("[Mapview] marker click", event.id);
-                  handleMarkerClick(event);
-                },
+                click: () => handleMarkerClick(event),
               }}
             />
           ))}
@@ -143,9 +196,9 @@ export const Mapview = ({
         eventId={activeEventId}
         prefillCoords={prefillCoords}
         currentUser={currentUser}
-        onSaved={onSaved}
+        onSaved={handleSaved}
       />
-    </>
+    </Container>
   );
 };
 
