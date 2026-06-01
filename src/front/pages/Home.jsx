@@ -5,79 +5,48 @@ import { Mapview } from "../components/Mapview";
 import EventCard from "../components/EventCard";
 import { BottomNavbar } from "../components/ButtonNavbar";
 
-export const Home=()=>{
+export const Home = () => {
+	const user = JSON.parse(localStorage.getItem("user"));
 
-const [showModal,setShowModal]=
-useState(false);
+	const [showModal, setShowModal] = useState(false);
+	const [createEventData, setCreateEventData] = useState({});
+	const [selectedEvent, setSelectedEvent] = useState(null);
 
-const [createEventData,
-setCreateEventData]=
-useState({});
+	return (
+		<div className="home-page">
 
-const [selectedEvent,
-setSelectedEvent]=
-useState(null);
+			<Navbar />
 
-return(
+			<div className="container mt-3">
+				<h4>
+					Hola {user?.email}
+				</h4>
+			</div>
 
-<div className="home-page">
+			<Mapview
+				setSelectedEvent={setSelectedEvent}
+				setCreateEventData={(coords) => {
+					setCreateEventData(coords);
+					setShowModal(true);
+				}}
+			/>
 
-<Navbar/>
+			<EventCard
+				show={showModal}
+				handleClose={() => {
+					setShowModal(false);
+					setCreateEventData({});
+				}}
+				eventData={createEventData}
+			/>
 
-<Mapview
+			{selectedEvent && (
+				<div>
+				</div>
+			)}
 
-setSelectedEvent={
-setSelectedEvent
-}
+			<BottomNavbar />
 
-setCreateEventData={(coords)=>{
-
-setCreateEventData(
-coords
-);
-
-setShowModal(
-true
-);
-
-}}
-
-/>
-
-<EventCard
-
-show={showModal}
-
-handleClose={()=>{
-
-setShowModal(
-false
-);
-
-setCreateEventData(
-{}
-);
-
-}}
-
-eventData={
-createEventData
-}
-
-/>
-
-{selectedEvent && (
-
-<div>
-
-</div>
-
-)}
-
-<BottomNavbar/>
-
-</div>
-
-)
-
-}
+		</div>
+	);
+};
