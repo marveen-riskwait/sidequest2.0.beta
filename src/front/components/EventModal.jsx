@@ -25,6 +25,7 @@ import {
   FiMessageSquare,
   FiEdit2,
   FiSave,
+  FiXCircle,
 } from "react-icons/fi";
 
 // =============================================================
@@ -177,7 +178,7 @@ const reverseGeocode = async (lat, lng) => {
 //     prefillCoords     -> { latitude, longitude } when opening from a map click
 //     currentUser       -> { id, email } of the logged user (from localStorage)
 //     onSaved           -> callback after create/update (refresh map etc.)
-//     onDeleted         -> not used yet
+//     onDeleted         -> callback after cancellation (refresh map/event list)
 export const EventModal = ({
   show,
   onHide,
@@ -205,9 +206,10 @@ export const EventModal = ({
   const [eventData, setEventData] = useState(null); // hydrated server response
   const [loading, setLoading] = useState(false);
   const [saving, setSaving]   = useState(false);
-  const [deleting, setDeleting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [error, setError]     = useState(null);
   const [toast, setToast]     = useState(null);
+  const [confirmCancel, setConfirmCancel] = useState(false);
 
   // --- friends + invitations ---
   const [friends, setFriends] = useState([]);
@@ -232,6 +234,7 @@ export const EventModal = ({
     setToast(null);
     setInvitedIds([]);
     setMessages([]);
+    setConfirmCancel(false);
 
     // load friends list (used by both create and edit)
     apiListFriends().then(setFriends).catch(() => setFriends([]));
@@ -410,22 +413,23 @@ export const EventModal = ({
     }
   };
 
-  const handleDelete = async () => {
+  // ─── CANCEL EVENT (creator only) ───
+  // Removes the event from the database (backend DELETE), drops its
+  // chat room, participants and related notifications. The parent
+  // (EventsList / Map) refreshes via onDeleted so the card disappears.
+  const handleCancelEvent = async () => {
     if (!isEditMode) return;
-    const ok = window.confirm(
-      "Delete this event? This will also remove its chat and all participants. This cannot be undone."
-    );
-    if (!ok) return;
-    setDeleting(true);
+    setCancelling(true);
     setError(null);
     try {
       await apiDeleteEvent(eventId);
+      setConfirmCancel(false);
       onDeleted(eventId);
       onHide();
     } catch (e) {
       setError(e.message);
     } finally {
-      setDeleting(false);
+      setCancelling(false);
     }
   };
 
@@ -745,19 +749,16 @@ export const EventModal = ({
         {isEditMode && isCreator && (
           <Button
             variant="outline-danger"
-            onClick={handleDelete}
-            disabled={deleting || saving}
+            onClick={() => setConfirmCancel(true)}
+            disabled={cancelling || saving}
             className="me-auto"
           >
-            {deleting
-              ? <Spinner animation="border" size="sm" />
-              : <><FiTrash2 className="me-1" /> Delete event</>
-            }
+            <FiXCircle className="me-1" /> Cancel event
           </Button>
         )}
         <Button variant="outline-light" onClick={onHide}>Close</Button>
         {(!isEditMode || isCreator) && (
-          <Button onClick={handleSave} disabled={saving || deleting}>
+          <Button onClick={handleSave} disabled={saving || cancelling}>
             {saving
               ? <Spinner animation="border" size="sm" />
               : <><FiSave className="me-1" /> {isEditMode ? "Save changes" : "Create"}</>
@@ -765,6 +766,41 @@ export const EventModal = ({
           </Button>
         )}
       </Modal.Footer>
+
+      {/* ─────────── CANCEL EVENT CONFIRMATION ─────────── */}
+      <Modal
+        show={confirmCancel}
+        onHide={() => !cancelling && setConfirmCancel(false)}
+        centered
+        contentClassName="bg-dark text-light border border-secondary"
+      >
+        <Modal.Header closeButton closeVariant="white">
+          <Modal.Title>Cancel this event?</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          This will permanently remove the event from your list, drop its chat
+          and disinvite every participant. This action cannot be undone.
+        </Modal.Body>
+        <Modal.Footer className="border-secondary">
+          <Button
+            variant="outline-light"
+            onClick={() => setConfirmCancel(false)}
+            disabled={cancelling}
+          >
+            Keep event
+          </Button>
+          <Button
+            variant="danger"
+            onClick={handleCancelEvent}
+            disabled={cancelling}
+          >
+            {cancelling
+              ? <Spinner animation="border" size="sm" />
+              : <><FiXCircle className="me-1" /> Yes, cancel event</>
+            }
+          </Button>
+        </Modal.Footer>
+      </Modal>
     </Modal>
   );
 };

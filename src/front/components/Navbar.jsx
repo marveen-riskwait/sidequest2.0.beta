@@ -43,7 +43,7 @@ const fetchWithRetry = async (url, options = {}) => {
     for (;;) {
         try {
             const res = await fetch(url, options);
-            return res; // on retourne meme les 4xx/5xx (le caller decide)
+            return res;
         } catch (_) {
             await new Promise((r) => setTimeout(r, delay));
             delay = Math.min(delay * 2, 4000);
@@ -79,6 +79,17 @@ const sendEventMessage = async (eventId, text) => {
     return res.json();
 };
 
+const markRoomRead = async (roomId) => {
+    try {
+        await fetchWithRetry(`${API}/api/chat/rooms/${roomId}/read`, {
+            method: "PUT",
+            headers: authHeaders(),
+        });
+    } catch (_) {
+        /* best-effort */
+    }
+};
+
 // =====================================================
 // STYLES (dark, coherent avec EventModal / Profile)
 // =====================================================
@@ -100,12 +111,15 @@ const NAVBAR_CSS = `
   border-radius: 12px; padding: 0.6rem 0.75rem; margin-bottom: 0.6rem;
   cursor: pointer;
   transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  position: relative;
 }
 .sq-chat-card:hover {
   transform: translateY(-2px);
   border-color: #6366f1;
   box-shadow: 0 6px 16px rgba(99,102,241,0.15);
 }
+.sq-chat-card.has-unread { border-color: #6366f1; }
+
 /* Avatar carre arrondi avec image de l'event (ou fallback gradient) */
 .sq-chat-avatar {
   width: 56px; height: 56px; border-radius: 12px;
@@ -138,6 +152,14 @@ const NAVBAR_CSS = `
 .sq-chat-card-empty {
   font-size: 0.8rem; color: #6c757d; font-style: italic;
   margin-top: 0.15rem;
+}
+.sq-chat-card-badge {
+  background: #ef4444; color: #fff;
+  font-size: 0.68rem; font-weight: 700;
+  border-radius: 999px;
+  padding: 0.1rem 0.45rem;
+  margin-left: 0.4rem;
+  flex-shrink: 0;
 }
 
 /* Thread inline */
@@ -178,7 +200,6 @@ const NAVBAR_CSS = `
 
 @media (max-width: 575.98px) {
   .sq-navbar .navbar-brand { font-size: 1.5rem; }
-  .sq-hide-xs { display: none !important; }
 }
 `;
 
@@ -240,10 +261,13 @@ export const Navbar = () => {
     }, [isLogged, location.pathname]);
 
     // =====================================================
-    // LOAD CHAT ROOMS
+    // LOAD CHAT ROOMS + POLL for unread badge
     // =====================================================
     useEffect(() => {
-        if (isLogged) getChatRooms(dispatch);
+        if (!isLogged) return;
+        getChatRooms(dispatch);
+        const t = setInterval(() => getChatRooms(dispatch), 15000);
+        return () => clearInterval(t);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isLogged]);
 
@@ -287,16 +311,24 @@ export const Navbar = () => {
     // =====================================================
     // CHAT HANDLERS
     // =====================================================
-    const openRoom = (room) => {
+    const openRoom = async (room) => {
         setActiveRoom(room);
         setMessages([]);
         setReplyText("");
+
+        // Mark as read both server-side and locally so the badge decreases immediately.
+        if (room?.id) {
+            dispatch({ type: "mark_room_read_local", payload: room.id });
+            markRoomRead(room.id);
+        }
     };
 
     const backToList = () => {
         setActiveRoom(null);
         setMessages([]);
         setReplyText("");
+        // refresh rooms list (counts + previews)
+        getChatRooms(dispatch);
     };
 
     const handleSendReply = async () => {
@@ -319,7 +351,8 @@ export const Navbar = () => {
     // =====================================================
     // RENDER
     // =====================================================
-    const chatCount = store.chatRooms?.length || 0;
+    // Counter shows number of UNREAD messages, not number of chat rooms.
+    const chatUnread = store.chatUnreadTotal || 0;
 
     return (
         <>
@@ -338,25 +371,24 @@ export const Navbar = () => {
                     <Nav className="d-flex flex-row align-items-center gap-2 gap-md-3">
                         {isLogged ? (
                             <>
-                                <span className="sq-hide-xs">
-                                    <NotificationBell />
-                                </span>
+                                {/* Notification bell : visible on mobile too */}
+                                <NotificationBell />
 
                                 <Button
                                     variant="dark"
                                     className="position-relative border-0 p-2"
                                     onClick={() => setShowMessages(true)}
-                                    title="Mes chats"
+                                    title="Mis mensajes"
                                 >
                                     <FiMail size={24} color="white" />
-                                    {chatCount > 0 && (
+                                    {chatUnread > 0 && (
                                         <Badge
                                             bg="danger"
                                             pill
                                             className="position-absolute top-0 start-100 translate-middle"
                                             style={{ fontSize: "0.65rem" }}
                                         >
-                                            {chatCount}
+                                            {chatUnread > 99 ? "99+" : chatUnread}
                                         </Badge>
                                     )}
                                 </Button>
@@ -442,21 +474,22 @@ export const Navbar = () => {
                 </Modal.Header>
 
                 <Modal.Body>
-                    {!activeRoom && chatCount === 0 && (
+                    {!activeRoom && (!store.chatRooms || store.chatRooms.length === 0) && (
                         <p className="text-muted mb-0">
                             No tienes chats activos. Crea o unete a un evento para empezar.
                         </p>
                     )}
 
-                    {!activeRoom && chatCount > 0 && (
+                    {!activeRoom && store.chatRooms && store.chatRooms.length > 0 && (
                         <ListGroup variant="flush">
                             {store.chatRooms.map((room) => {
                                 const label = getChatLabel(room, currentUserId);
                                 const last = room.last_message;
+                                const unread = room.unread_count || 0;
                                 return (
                                     <div
                                         key={room.id}
-                                        className="sq-chat-card"
+                                        className={`sq-chat-card ${unread > 0 ? "has-unread" : ""}`}
                                         onClick={() => openRoom(room)}
                                     >
                                         {room.event_image ? (
@@ -465,7 +498,6 @@ export const Navbar = () => {
                                                 alt={label}
                                                 className="sq-chat-avatar"
                                                 onError={(e) => {
-                                                    // si l'image casse, on bascule sur le fallback
                                                     e.currentTarget.style.display = "none";
                                                 }}
                                             />
@@ -487,9 +519,16 @@ export const Navbar = () => {
                                                 )}
                                             </div>
                                             {last ? (
-                                                <div className="sq-chat-card-preview" title={last.text}>
-                                                    {last.sender_id === currentUserId ? "Tu: " : ""}
-                                                    {last.text}
+                                                <div className="sq-chat-card-row">
+                                                    <div className="sq-chat-card-preview" title={last.text}>
+                                                        {last.sender_id === currentUserId ? "Tu: " : ""}
+                                                        {last.text}
+                                                    </div>
+                                                    {unread > 0 && (
+                                                        <span className="sq-chat-card-badge">
+                                                            {unread > 99 ? "99+" : unread}
+                                                        </span>
+                                                    )}
                                                 </div>
                                             ) : (
                                                 <div className="sq-chat-card-empty">
