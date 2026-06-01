@@ -34,13 +34,15 @@ const authHeaders = () => ({
   Authorization: `Bearer ${localStorage.getItem("token")}`,
 });
 const handle = async (res) => {
-  const data = await res.json().catch(() => ({}));
+  const data = await res.json();
+  console.log(data);
+  
   if (!res.ok) throw new Error(data.msg || `Request failed (${res.status})`);
   return data;
 };
 const apiListEvents = () =>
   fetch(`${API}/api/events`, { headers: authHeaders() }).then(handle);
-
+// .catch(() => ({}))
 const CSS = `
 .events-list-page {
   min-height: 100vh;

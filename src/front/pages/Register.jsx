@@ -110,8 +110,13 @@ export const Register = () => {
 			<div className="sq-auth-wrap">
 				<Container className="d-flex justify-content-center">
 					<Card className="sq-auth-card p-4">
-						<h2 className="sq-auth-title text-center mb-1">SQ</h2>
-						<p className="text-center text-secondary mb-4">Register</p>
+						<h2 className="sq-auth-title text-center mb-1">
+							<img
+								src="src/front/assets/img/logoSideQuest.png"
+								alt="SideQuest"
+								style={{ filter: "brightness(0) invert(1)", height: "60px", width: "auto" }} />
+						</h2>
+						<p className="text-center text-secondary mb-4">Your SideQuest waits for you!</p>
 
 						<Form onSubmit={handleRegister}>
 							<Form.Group className="mb-3">
