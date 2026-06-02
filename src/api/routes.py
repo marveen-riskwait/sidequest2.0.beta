@@ -880,7 +880,7 @@ def get_user_profile(user_id):
         "city":                user.city,
         "bio":                 user.bio,
         "profile_picture_url": user.profile_picture_url,
-        "created_at":          user.created_at.isoformat() if user.created_at else None,
+        "created_at":          user.created_at.isoformat() + "Z" if user.created_at else None,
     }
 
     if is_self or is_friend:
@@ -1026,7 +1026,7 @@ def mark_chat_room_read(room_id):
     return jsonify({
         "msg":          "Room marked as read",
         "room_id":      room_id,
-        "last_read_at": membership.last_read_at.isoformat(),
+        "last_read_at": membership.last_read_at.isoformat() + "Z",
     }), 200
 
 

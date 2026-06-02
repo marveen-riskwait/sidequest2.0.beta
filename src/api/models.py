@@ -50,7 +50,7 @@ class User(db.Model):
             "profile_picture_url": self.profile_picture_url,
             "birthdate":           self.birthdate,
             "phone":               self.phone,
-            "created_at":          self.created_at.isoformat() if self.created_at else None,
+            "created_at":          self.created_at.isoformat() + "Z" if self.created_at else None,
         }
 
 # ── EVENT ─────────────────────────────────────────────────
@@ -102,7 +102,7 @@ class Event(db.Model):
                 for inv in (self.invitations or [])
             ],
             "pending_invitations_count": len(self.invitations or []),
-            "created_at":         self.created_at.isoformat() if self.created_at else None,
+            "created_at":         self.created_at.isoformat() + "Z" if self.created_at else None,
         }
         if current_user_id is not None:
             if current_user_id == self.creator_id:
@@ -151,8 +151,8 @@ class Friendship(db.Model):
             "requester_id": self.requester_id,
             "addressee_id": self.addressee_id,
             "status":       self.status,
-            "created_at":   self.created_at.isoformat() if self.created_at else None,
-            "updated_at":   self.updated_at.isoformat() if self.updated_at else None,
+            "created_at":   self.created_at.isoformat() + "Z" if self.created_at else None,
+            "updated_at":   self.updated_at.isoformat() + "Z" if self.updated_at else None,
             "requester":    {"id": self.requester.id, "email": self.requester.email} if self.requester else None,
             "addressee":    {"id": self.addressee.id, "email": self.addressee.email} if self.addressee else None,
         }
@@ -190,7 +190,7 @@ class EventInvitation(db.Model):
             "event_id":   self.event_id,
             "user_id":    self.user_id,
             "inviter_id": self.inviter_id,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": self.created_at.isoformat() + "Z" if self.created_at else None,
         }
 
 
@@ -235,8 +235,8 @@ class ChatRoom(db.Model):
                 "media_type":   last.media_type,
                 "sender_id":    last.sender_id,
                 "sender_email": last.sender.email if last.sender else None,
-                "created_at":   last.created_at.isoformat() if last.created_at else None,
-                "edited_at":    last.edited_at.isoformat() if last.edited_at else None,
+                "created_at":   last.created_at.isoformat() + "Z" if last.created_at else None,
+                "edited_at":    last.edited_at.isoformat() + "Z" if last.edited_at else None,
             }
 
         # unread count for the current user — messages newer than their
@@ -258,7 +258,7 @@ class ChatRoom(db.Model):
             "id":             self.id,
             "type":           self.type,
             "event_id":       self.event_id,
-            "created_at":     self.created_at.isoformat() if self.created_at else None,
+            "created_at":     self.created_at.isoformat() + "Z" if self.created_at else None,
             "messages_count": len(self.messages),
             "unread_count":   unread_count,
             "last_message":   last_message,
@@ -318,8 +318,8 @@ class ChatRoomMembership(db.Model):
             "id":           self.id,
             "room_id":      self.room_id,
             "user_id":      self.user_id,
-            "last_read_at": self.last_read_at.isoformat() if self.last_read_at else None,
-            "created_at":   self.created_at.isoformat() if self.created_at else None,
+            "last_read_at": self.last_read_at.isoformat() + "Z" if self.last_read_at else None,
+            "created_at":   self.created_at.isoformat() + "Z" if self.created_at else None,
         }
 
 
@@ -364,8 +364,8 @@ class ChatMessage(db.Model):
             "text":         self.text,
             "media_url":    self.media_url,
             "media_type":   self.media_type,
-            "created_at":   self.created_at.isoformat() if self.created_at else None,
-            "edited_at":    self.edited_at.isoformat() if self.edited_at else None,
+            "created_at":   self.created_at.isoformat() + "Z" if self.created_at else None,
+            "edited_at":    self.edited_at.isoformat() + "Z" if self.edited_at else None,
         }
 
 
@@ -403,5 +403,5 @@ class Notification(db.Model):
             "type":       self.type,
             "payload":    self.payload or {},
             "is_read":    self.is_read,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": self.created_at.isoformat() + "Z" if self.created_at else None,
         }
