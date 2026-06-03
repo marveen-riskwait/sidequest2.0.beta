@@ -263,12 +263,16 @@ export const BottomNavbar = () => {
         phone: profile.phone || null,
       };
       const data = await apiUpdateMyProfile(payload);
-      // keep current stats but refresh user fields
-      setProfile((p) => ({ ...p, ...data.user }));
+      // Guard: ignore malformed responses. Without this, an unexpected
+      // payload (data.user === undefined) would persist the literal
+      // string "undefined" in localStorage and crash initialStore on
+      // the next boot.
+      if (data && data.user && typeof data.user === "object") {
+        setProfile((p) => ({ ...p, ...data.user }));
+        localStorage.setItem("user", JSON.stringify(data.user));
+      }
       setProfileToast("Profile saved");
       setTimeout(() => setProfileToast(null), 2000);
-      // also sync the cached user in localStorage so Navbar greeting stays correct
-      localStorage.setItem("user", JSON.stringify(data.user));
     } catch (e) {
       setProfileError(e.message);
     } finally {

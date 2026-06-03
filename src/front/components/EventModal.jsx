@@ -29,6 +29,11 @@ import {
   FiSquare,
   FiCheck,
   FiX,
+  FiCheckCircle,
+  FiHelpCircle,
+  FiXCircle,
+  FiLogOut,
+  FiUserCheck,
 } from "react-icons/fi";
 
 // =============================================================
@@ -55,8 +60,54 @@ const apiGetEvent       = async (id) => await fetch(`${API}/api/events/${id}`, {
 const apiCreateEvent    = (body) => fetch(`${API}/api/events`,        { method: "POST",   headers: authHeaders(), body: JSON.stringify(body) }).then(handle);
 const apiUpdateEvent    = (id, body) => fetch(`${API}/api/events/${id}`,  { method: "PUT",  headers: authHeaders(), body: JSON.stringify(body) }).then(handle);
 const apiDeleteEvent    = (id) => fetch(`${API}/api/events/${id}`,  { method: "DELETE", headers: authHeaders() }).then(handle);
-const apiInviteFriend   = (id, userId) => fetch(`${API}/api/events/${id}/invite`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ user_id: userId }) }).then(handle);
+
+// Multi-invite (back-compat: array of user ids in one call)
+const apiInviteBatch    = (id, userIds) =>
+  fetch(`${API}/api/events/${id}/invite`, {
+    method: "POST", headers: authHeaders(),
+    body: JSON.stringify({ user_ids: userIds }),
+  }).then(handle);
+
 const apiRemoveMember   = (id, userId) => fetch(`${API}/api/events/${id}/participants/${userId}`, { method: "DELETE", headers: authHeaders() }).then(handle);
+
+// Unified response (going / maybe / not_going) — works for both invitees
+// (joins them or declines) and participants (just updates rsvp).
+const apiRespond        = (id, response) =>
+  fetch(`${API}/api/events/${id}/respond`, {
+    method: "PUT", headers: authHeaders(),
+    body: JSON.stringify({ response }),
+  }).then(handle);
+
+// Leave event (non-creator participants)
+const apiLeaveEvent     = (id) =>
+  fetch(`${API}/api/events/${id}/leave`, {
+    method: "DELETE", headers: authHeaders(),
+  }).then(handle);
+
+// Invite suggestions (a participant proposes; the creator approves)
+const apiSuggestInvite      = (id, userIds) =>
+  fetch(`${API}/api/events/${id}/suggest-invite`, {
+    method: "POST", headers: authHeaders(),
+    body: JSON.stringify({ user_ids: userIds }),
+  }).then(handle);
+const apiListSuggestions    = (id) =>
+  fetch(`${API}/api/events/${id}/suggestions`, { headers: authHeaders() }).then(handle);
+const apiApproveSuggestion  = (id, sid) =>
+  fetch(`${API}/api/events/${id}/suggestions/${sid}/approve`, {
+    method: "PUT", headers: authHeaders(),
+  }).then(handle);
+const apiRefuseSuggestion   = (id, sid) =>
+  fetch(`${API}/api/events/${id}/suggestions/${sid}/refuse`, {
+    method: "PUT", headers: authHeaders(),
+  }).then(handle);
+const apiApproveAllSuggestions = (id) =>
+  fetch(`${API}/api/events/${id}/suggestions/approve-all`, {
+    method: "PUT", headers: authHeaders(),
+  }).then(handle);
+const apiRefuseAllSuggestions  = (id) =>
+  fetch(`${API}/api/events/${id}/suggestions/refuse-all`, {
+    method: "PUT", headers: authHeaders(),
+  }).then(handle);
 
 // Chat — legacy event-scoped endpoints (text + media supported server-side)
 const apiGetMessages    = (id) => fetch(`${API}/api/events/${id}/chat/messages`, { headers: authHeaders() }).then(handle);
@@ -209,6 +260,83 @@ const EVENT_CSS = `
   color: #e9ecef !important;
 }
 body.modal-open .bottom-navbar { display: none; }
+
+/* ── RESPONSE BAR (Voy / Tal vez / No voy) ── */
+.sq-response-bar {
+  display: flex; gap: 6px; padding: 10px;
+  background: #0f111a; border: 1px solid #262a36; border-radius: 12px;
+  margin-bottom: 1rem;
+}
+.sq-response-btn {
+  flex: 1;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  border: 1px solid #262a36;
+  background: #161922;
+  color: #adb5bd;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.sq-response-btn:hover { background: #1e2230; color: #fff; }
+.sq-response-btn.active-going     { background: rgba(34,211,238,0.18); border-color: #22d3ee; color: #22d3ee; }
+.sq-response-btn.active-maybe     { background: rgba(250,204,21,0.18); border-color: #facc15; color: #facc15; }
+.sq-response-btn.active-not_going { background: rgba(244,63,94,0.18);  border-color: #f43f5e; color: #f43f5e; }
+.sq-response-btn:disabled { opacity: 0.5; pointer-events: none; }
+
+/* RSVP pill next to participant name */
+.sq-rsvp-pill {
+  font-size: 0.6rem !important;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 8px !important;
+  border-radius: 999px !important;
+}
+.sq-rsvp-pill.going     { background: rgba(34,211,238,0.2)  !important; color: #22d3ee !important; }
+.sq-rsvp-pill.maybe     { background: rgba(250,204,21,0.2)  !important; color: #facc15 !important; }
+.sq-rsvp-pill.not_going { background: rgba(244,63,94,0.2)   !important; color: #f43f5e !important; }
+.sq-rsvp-pill.none      { background: #1e2230 !important; color: #6c757d !important; }
+
+/* Creator avatar in header */
+.sq-creator-row {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #262a36;
+  margin-bottom: 0.75rem;
+}
+.sq-creator-avatar {
+  width: 36px; height: 36px; border-radius: 50%;
+  object-fit: cover; border: 2px solid #6366f1;
+  background: #0f111a;
+}
+
+/* Suggestion row (creator's "Suggestions" tab) */
+.sq-suggestion-row {
+  display: flex; align-items: center; gap: 0.6rem;
+  background: #0f111a; border: 1px solid #262a36; border-radius: 10px;
+  padding: 0.6rem 0.75rem; margin-bottom: 0.5rem;
+}
+.sq-suggestion-avatar {
+  width: 36px; height: 36px; border-radius: 50%;
+  object-fit: cover; flex-shrink: 0;
+  border: 1px solid #262a36; background: #1e2230;
+}
+.sq-suggestion-body { flex: 1; min-width: 0; }
+.sq-suggestion-from {
+  font-size: 0.72rem; color: #6c757d; margin-top: 2px;
+}
+
+/* Friend checkbox list (multi-invite / multi-suggest) */
+.sq-friend-checkbox-row {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.4rem 0.6rem; border-radius: 8px;
+  cursor: pointer; transition: background 0.12s;
+}
+.sq-friend-checkbox-row:hover { background: #1e2230; }
+.sq-friend-checkbox-row.selected { background: rgba(99,102,241,0.12); }
 `;
 
 // =============================================================
@@ -381,6 +509,15 @@ export const EventModal = ({
       });
       const m = await apiGetMessages(eventId);
       setMessages(m.messages || []);
+      // Load pending suggestions if I'm the creator (silently no-op otherwise).
+      if (data.is_creator) {
+        try {
+          const s = await apiListSuggestions(eventId);
+          setSuggestions(Array.isArray(s) ? s : []);
+        } catch (_) { /* ignore */ }
+      } else {
+        setSuggestions([]);
+      }
     } catch (e) {
       setError(e.message);
     } finally {
@@ -500,20 +637,173 @@ export const EventModal = ({
 
   const [pendingInviteIds, setPendingInviteIds] = useState([]);
 
-  const handleInviteNow = async (friendUserId) => {
-    setPendingInviteIds((prev) => [...prev, friendUserId]);
+  // Multi-select state for the "Invite" list (creator) and the "Suggest"
+  // list (non-creator participant). Each is a Set of user ids.
+  const [selectedToInvite, setSelectedToInvite] = useState(() => new Set());
+  const [selectedToSuggest, setSelectedToSuggest] = useState(() => new Set());
+
+  // Suggestions tab state (creator only)
+  const [suggestions, setSuggestions] = useState([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [suggestionsBusy, setSuggestionsBusy] = useState(false);
+
+  // Response (going/maybe/not_going) saving state
+  const [respondBusy, setRespondBusy] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+
+  // Batch invite — sends one request with the full list.
+  const handleInviteBatch = async () => {
+    const ids = Array.from(selectedToInvite);
+    if (!ids.length) return;
+    setPendingInviteIds((prev) => [...prev, ...ids]);
     try {
-      const data = await apiInviteFriend(eventId, friendUserId);
+      const data = await apiInviteBatch(eventId, ids);
       setEventData(data.event);
-      showToast("Friend invited");
+      setSelectedToInvite(new Set());
+      const sent = (data.invitations || []).length;
+      const skipped = (data.skipped || []).length;
+      showToast(
+        skipped > 0 ? `${sent} invitation(s) sent, ${skipped} skipped` : `${sent} invitation(s) sent`
+      );
       onSaved(data.event);
     } catch (e) {
-      // if already a participant the backend returns 409 — keep pending state
-      // for any other error, remove from pending so user can retry
-      if (!e.message?.toLowerCase().includes("already")) {
-        setPendingInviteIds((prev) => prev.filter((id) => id !== friendUserId));
-      }
+      setPendingInviteIds((prev) => prev.filter((x) => !ids.includes(x)));
       showToast(e.message, "danger");
+    }
+  };
+
+  // Batch suggest (non-creator participant) — generates one notification
+  // per suggestion to the creator.
+  const handleSuggestBatch = async () => {
+    const ids = Array.from(selectedToSuggest);
+    if (!ids.length) return;
+    try {
+      const data = await apiSuggestInvite(eventId, ids);
+      setSelectedToSuggest(new Set());
+      const sent = (data.suggestions || []).length;
+      const skipped = (data.skipped || []).length;
+      showToast(
+        skipped > 0 ? `${sent} sugerencia(s) enviada(s), ${skipped} omitida(s)` : `${sent} sugerencia(s) enviada(s)`
+      );
+    } catch (e) {
+      showToast(e.message, "danger");
+    }
+  };
+
+  // Creator: pull pending suggestions and refresh after each action.
+  const reloadSuggestions = async () => {
+    if (!eventId) return;
+    setSuggestionsLoading(true);
+    try {
+      const data = await apiListSuggestions(eventId);
+      setSuggestions(Array.isArray(data) ? data : []);
+    } catch (e) {
+      // 403 if not creator — fine, just empty list
+      setSuggestions([]);
+    } finally {
+      setSuggestionsLoading(false);
+    }
+  };
+
+  const handleApproveSuggestion = async (sid) => {
+    if (suggestionsBusy) return;
+    setSuggestionsBusy(true);
+    try {
+      const data = await apiApproveSuggestion(eventId, sid);
+      setEventData(data.event);
+      await reloadSuggestions();
+      showToast("Sugerencia aprobada — invitación enviada");
+      onSaved(data.event);
+    } catch (e) {
+      showToast(e.message, "danger");
+    } finally {
+      setSuggestionsBusy(false);
+    }
+  };
+
+  const handleRefuseSuggestion = async (sid) => {
+    if (suggestionsBusy) return;
+    setSuggestionsBusy(true);
+    try {
+      const data = await apiRefuseSuggestion(eventId, sid);
+      setEventData(data.event);
+      await reloadSuggestions();
+      showToast("Sugerencia rechazada");
+      onSaved(data.event);
+    } catch (e) {
+      showToast(e.message, "danger");
+    } finally {
+      setSuggestionsBusy(false);
+    }
+  };
+
+  const handleApproveAllSuggestions = async () => {
+    if (suggestionsBusy) return;
+    setSuggestionsBusy(true);
+    try {
+      const data = await apiApproveAllSuggestions(eventId);
+      setEventData(data.event);
+      await reloadSuggestions();
+      const n = (data.invitations || []).length;
+      showToast(`${n} sugerencia(s) aprobada(s)`);
+      onSaved(data.event);
+    } catch (e) {
+      showToast(e.message, "danger");
+    } finally {
+      setSuggestionsBusy(false);
+    }
+  };
+
+  const handleRefuseAllSuggestions = async () => {
+    if (suggestionsBusy) return;
+    setSuggestionsBusy(true);
+    try {
+      const data = await apiRefuseAllSuggestions(eventId);
+      setEventData(data.event);
+      await reloadSuggestions();
+      showToast("Sugerencias rechazadas");
+      onSaved(data.event);
+    } catch (e) {
+      showToast(e.message, "danger");
+    } finally {
+      setSuggestionsBusy(false);
+    }
+  };
+
+  // Unified response (going/maybe/not_going). Works for invitees and participants.
+  const handleRespond = async (response) => {
+    if (respondBusy || !eventId) return;
+    setRespondBusy(true);
+    try {
+      const data = await apiRespond(eventId, response);
+      setEventData(data.event);
+      showToast(
+        response === "going" ? "Voy" :
+        response === "maybe" ? "Tal vez" :
+        "No voy"
+      );
+      onSaved(data.event);
+    } catch (e) {
+      showToast(e.message, "danger");
+    } finally {
+      setRespondBusy(false);
+    }
+  };
+
+  // Leave event entirely (non-creator only)
+  const handleLeave = async () => {
+    if (leaving || !eventId) return;
+    if (!window.confirm("¿Salir del evento? Perderás el acceso al chat.")) return;
+    setLeaving(true);
+    try {
+      await apiLeaveEvent(eventId);
+      showToast("Saliste del evento");
+      onSaved({ id: eventId, removed: true });
+      onHide();
+    } catch (e) {
+      showToast(e.message, "danger");
+    } finally {
+      setLeaving(false);
     }
   };
 
@@ -720,6 +1010,60 @@ export const EventModal = ({
         )}
         {toast && <Alert variant={toast.variant}>{toast.text}</Alert>}
 
+        {/* CREATOR ROW — visible at the top so you always know whose event it is */}
+        {!loading && isEditMode && eventData && (
+          <div className="sq-creator-row">
+            {eventData.creator_picture ? (
+              <img
+                src={eventData.creator_picture}
+                alt={eventData.creator_email}
+                className="sq-creator-avatar"
+              />
+            ) : (
+              <div
+                className="sq-creator-avatar"
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 14, fontWeight: 700, color: "#fff",
+                  background: "linear-gradient(135deg, #6366f1, #ec4899)",
+                }}
+              >
+                {initials(eventData.creator_email || "")}
+              </div>
+            )}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: "0.78rem", color: "#6c757d" }}>Creado por</div>
+              <strong style={{ color: "#e9ecef", fontSize: "0.9rem" }}>
+                {eventData.creator_username || eventData.creator_email}
+              </strong>
+            </div>
+            {eventData.going_count > 0 && (
+              <Badge bg="info">{eventData.going_count} voy</Badge>
+            )}
+          </div>
+        )}
+
+        {/* ALWAYS-VISIBLE RESPONSE BAR (above tabs) — for invitees and accepted non-creators */}
+        {!loading && isEditMode && eventData && !isCreator &&
+         (eventData.my_status === "pending" || eventData.my_status === "accepted") && (
+          <div className="sq-response-bar">
+            {[
+              { v: "going",     label: "Voy",     icon: <FiCheckCircle /> },
+              { v: "maybe",     label: "Tal vez", icon: <FiHelpCircle /> },
+              { v: "not_going", label: "No voy",  icon: <FiXCircle /> },
+            ].map((opt) => (
+              <button
+                key={opt.v}
+                className={`sq-response-btn${eventData.my_rsvp === opt.v ? ` active-${opt.v}` : ""}`}
+                disabled={respondBusy}
+                onClick={() => handleRespond(opt.v)}
+              >
+                {opt.icon} {opt.label}
+              </button>
+            ))}
+          </div>
+        )}
+
         {!loading && (
           <Tabs activeKey={tab} onSelect={(k) => setTab(k)} className="mb-3" fill>
 
@@ -828,71 +1172,190 @@ export const EventModal = ({
             >
               {isEditMode ? (
                 <>
+                  {/* CURRENT PARTICIPANTS with their rsvp pill */}
                   <div className="small text-secondary text-uppercase fw-semibold mb-2">
-                    Currently in
+                    Currently in ({participants.length})
                   </div>
                   <ListGroup className="mb-3">
-                    {participants.map((p) => (
-                      <ListGroup.Item
-                        key={p.id}
-                        className="event-participant-row d-flex align-items-center justify-content-between"
-                      >
-                        <div className="d-flex align-items-center gap-2">
-                          <div style={avatarStyle(p.id)}>{initials(p.email)}</div>
-                          <span>{p.email}</span>
-                          {p.id === eventData?.creator_id && (
-                            <Badge bg="info" className="ms-1">Creator</Badge>
+                    {participants.map((p) => {
+                      const rsvp = p.rsvp || "none";
+                      const rsvpLabel = rsvp === "going" ? "Voy"
+                                      : rsvp === "maybe" ? "Tal vez"
+                                      : rsvp === "not_going" ? "No voy"
+                                      : "—";
+                      return (
+                        <ListGroup.Item
+                          key={p.id}
+                          className="event-participant-row d-flex align-items-center justify-content-between"
+                        >
+                          <div className="d-flex align-items-center gap-2">
+                            {p.profile_picture_url ? (
+                              <img
+                                src={p.profile_picture_url}
+                                alt={p.email}
+                                style={{ width: 36, height: 36, borderRadius: "50%", objectFit: "cover", border: "1px solid #262a36" }}
+                              />
+                            ) : (
+                              <div style={avatarStyle(p.id)}>{initials(p.email)}</div>
+                            )}
+                            <span>{p.email}</span>
+                            {p.id === eventData?.creator_id && (
+                              <Badge bg="info" className="ms-1">Creator</Badge>
+                            )}
+                            <Badge className={`sq-rsvp-pill ${rsvp}`}>{rsvpLabel}</Badge>
+                          </div>
+                          {isCreator && p.id !== eventData?.creator_id && (
+                            <Button
+                              variant="outline-danger"
+                              size="sm"
+                              onClick={() => handleRemoveMember(p.id)}
+                              title="Sacar del evento"
+                            >
+                              <FiTrash2 />
+                            </Button>
                           )}
-                        </div>
-                        {isCreator && p.id !== eventData?.creator_id && (
-                          <Button
-                            variant="outline-danger"
-                            size="sm"
-                            onClick={() => handleRemoveMember(p.id)}
-                          >
-                            <FiTrash2 />
-                          </Button>
-                        )}
-                      </ListGroup.Item>
-                    ))}
+                        </ListGroup.Item>
+                      );
+                    })}
                   </ListGroup>
 
+                  {/* LEAVE EVENT — non-creator participants */}
+                  {!isCreator && eventData?.my_status === "accepted" && (
+                    <div className="mb-3">
+                      <Button
+                        variant="outline-danger"
+                        size="sm"
+                        onClick={handleLeave}
+                        disabled={leaving}
+                      >
+                        {leaving ? <Spinner size="sm" animation="border" /> : <><FiLogOut className="me-1" /> Salir del evento</>}
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* CREATOR: multi-select invite list */}
                   {isCreator && (
                     <>
-                      <div className="small text-secondary text-uppercase fw-semibold mb-2">
-                        Invite a friend
+                      <div className="small text-secondary text-uppercase fw-semibold mb-2 d-flex justify-content-between align-items-center">
+                        <span>Invitar amigos</span>
+                        {selectedToInvite.size > 0 && (
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            onClick={handleInviteBatch}
+                          >
+                            <FiUserPlus className="me-1" /> Invitar ({selectedToInvite.size})
+                          </Button>
+                        )}
                       </div>
                       {friendsAvailable.length === 0 ? (
-                        <div className="small text-secondary">
-                          No friends left to invite.
-                        </div>
+                        <div className="small text-secondary">No quedan amigos por invitar.</div>
                       ) : (
-                        <ListGroup>
-                          {friendsAvailable.map((u) => (
-                            <ListGroup.Item
-                              key={u.id}
-                              className="event-participant-row d-flex align-items-center justify-content-between"
-                            >
-                              <div className="d-flex align-items-center gap-2">
-                                <div style={avatarStyle(u.id)}>{initials(u.email)}</div>
-                                <span>{u.email}</span>
+                        <div>
+                          {friendsAvailable.map((u) => {
+                            const isPending = pendingInviteIds.includes(u.id);
+                            const selected  = selectedToInvite.has(u.id);
+                            return (
+                              <div
+                                key={u.id}
+                                className={`sq-friend-checkbox-row ${selected ? "selected" : ""}`}
+                                onClick={() => {
+                                  if (isPending) return;
+                                  setSelectedToInvite((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(u.id)) next.delete(u.id);
+                                    else next.add(u.id);
+                                    return next;
+                                  });
+                                }}
+                              >
+                                {u.profile_picture_url ? (
+                                  <img
+                                    src={u.profile_picture_url}
+                                    alt={u.email}
+                                    style={{ width: 36, height: 36, borderRadius: "50%", objectFit: "cover", border: "1px solid #262a36" }}
+                                  />
+                                ) : (
+                                  <div style={avatarStyle(u.id)}>{initials(u.email)}</div>
+                                )}
+                                <span style={{ flex: 1 }}>{u.email}</span>
+                                {isPending ? (
+                                  <Badge bg="secondary">
+                                    <FiClock className="me-1" /> Pending
+                                  </Badge>
+                                ) : (
+                                  <Form.Check
+                                    type="checkbox"
+                                    checked={selected}
+                                    onChange={() => { /* handled by row onClick */ }}
+                                    onClick={(e) => e.stopPropagation()}
+                                  />
+                                )}
                               </div>
-                              {pendingInviteIds.includes(u.id) ? (
-                                <Button size="sm" variant="secondary" disabled>
-                                  <FiClock className="me-1" /> Pending
-                                </Button>
-                              ) : (
-                                <Button
-                                  size="sm"
-                                  variant="primary"
-                                  onClick={() => handleInviteNow(u.id)}
-                                >
-                                  <FiUserPlus className="me-1" /> Invite
-                                </Button>
-                              )}
-                            </ListGroup.Item>
-                          ))}
-                        </ListGroup>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* NON-CREATOR ACCEPTED PARTICIPANT: suggest friends to the creator */}
+                  {!isCreator && eventData?.my_status === "accepted" && (
+                    <>
+                      <div className="small text-secondary text-uppercase fw-semibold mb-2 mt-4 d-flex justify-content-between align-items-center">
+                        <span>Sugerir invitar a un amigo</span>
+                        {selectedToSuggest.size > 0 && (
+                          <Button
+                            size="sm"
+                            variant="warning"
+                            onClick={handleSuggestBatch}
+                          >
+                            <FiUserPlus className="me-1" /> Sugerir ({selectedToSuggest.size})
+                          </Button>
+                        )}
+                      </div>
+                      <div className="small text-secondary mb-2">
+                        El creador recibirá una notificación y decidirá si manda la invitación.
+                      </div>
+                      {friendsAvailable.length === 0 ? (
+                        <div className="small text-secondary">No tienes amigos que no estén ya en el evento.</div>
+                      ) : (
+                        <div>
+                          {friendsAvailable.map((u) => {
+                            const selected = selectedToSuggest.has(u.id);
+                            return (
+                              <div
+                                key={u.id}
+                                className={`sq-friend-checkbox-row ${selected ? "selected" : ""}`}
+                                onClick={() => {
+                                  setSelectedToSuggest((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(u.id)) next.delete(u.id);
+                                    else next.add(u.id);
+                                    return next;
+                                  });
+                                }}
+                              >
+                                {u.profile_picture_url ? (
+                                  <img
+                                    src={u.profile_picture_url}
+                                    alt={u.email}
+                                    style={{ width: 36, height: 36, borderRadius: "50%", objectFit: "cover", border: "1px solid #262a36" }}
+                                  />
+                                ) : (
+                                  <div style={avatarStyle(u.id)}>{initials(u.email)}</div>
+                                )}
+                                <span style={{ flex: 1 }}>{u.email}</span>
+                                <Form.Check
+                                  type="checkbox"
+                                  checked={selected}
+                                  onChange={() => { /* handled by row onClick */ }}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              </div>
+                            );
+                          })}
+                        </div>
                       )}
                     </>
                   )}
@@ -900,11 +1363,11 @@ export const EventModal = ({
               ) : (
                 <>
                   <div className="small text-secondary text-uppercase fw-semibold mb-2">
-                    Invite friends (you can add more later)
+                    Invitar amigos (puedes añadir más después)
                   </div>
                   {friends.length === 0 ? (
                     <div className="small text-secondary">
-                      You have no friends yet. Add some on the Friends page.
+                      Aún no tienes amigos. Añade alguno en la página Friends.
                     </div>
                   ) : (
                     <ListGroup>
@@ -918,7 +1381,15 @@ export const EventModal = ({
                             className="event-participant-row d-flex align-items-center justify-content-between"
                           >
                             <div className="d-flex align-items-center gap-2">
-                              <div style={avatarStyle(u.id)}>{initials(u.email)}</div>
+                              {u.profile_picture_url ? (
+                                <img
+                                  src={u.profile_picture_url}
+                                  alt={u.email}
+                                  style={{ width: 36, height: 36, borderRadius: "50%", objectFit: "cover", border: "1px solid #262a36" }}
+                                />
+                              ) : (
+                                <div style={avatarStyle(u.id)}>{initials(u.email)}</div>
+                              )}
                               <span>{u.email}</span>
                             </div>
                             <Form.Check
@@ -934,6 +1405,102 @@ export const EventModal = ({
                 </>
               )}
             </Tab>
+
+            {/* ─────────── SUGGESTIONS (creator only) ─────────── */}
+            {isEditMode && isCreator && (
+              <Tab
+                eventKey="suggestions"
+                title={
+                  <span>
+                    <FiUserCheck className="me-1" /> Sugerencias{" "}
+                    {suggestions.length > 0 && (
+                      <Badge bg="warning" text="dark">{suggestions.length}</Badge>
+                    )}
+                  </span>
+                }
+              >
+                {suggestionsLoading ? (
+                  <div className="text-center py-3 text-secondary">
+                    <Spinner size="sm" animation="border" />
+                  </div>
+                ) : suggestions.length === 0 ? (
+                  <div className="text-center py-4 text-secondary small">
+                    No hay sugerencias pendientes.
+                  </div>
+                ) : (
+                  <>
+                    <div className="d-flex justify-content-between align-items-center mb-3">
+                      <span className="small text-secondary">
+                        {suggestions.length} sugerencia{suggestions.length === 1 ? "" : "s"} pendiente{suggestions.length === 1 ? "" : "s"}
+                      </span>
+                      <div className="d-flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline-success"
+                          onClick={handleApproveAllSuggestions}
+                          disabled={suggestionsBusy}
+                        >
+                          <FiCheck className="me-1" /> Aprobar todas
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline-danger"
+                          onClick={handleRefuseAllSuggestions}
+                          disabled={suggestionsBusy}
+                        >
+                          <FiX className="me-1" /> Rechazar todas
+                        </Button>
+                      </div>
+                    </div>
+                    {suggestions.map((s) => {
+                      const target = s.suggested_user || {};
+                      const from   = s.suggested_by || {};
+                      return (
+                        <div key={s.id} className="sq-suggestion-row">
+                          {target.profile_picture_url ? (
+                            <img
+                              src={target.profile_picture_url}
+                              alt={target.email}
+                              className="sq-suggestion-avatar"
+                            />
+                          ) : (
+                            <div className="sq-suggestion-avatar" style={avatarStyle(target.id || 0)}>
+                              {initials(target.email || "")}
+                            </div>
+                          )}
+                          <div className="sq-suggestion-body">
+                            <strong>{target.email || `User #${s.suggested_user_id}`}</strong>
+                            <div className="sq-suggestion-from">
+                              Sugerido por <strong>{from.email || `User #${s.suggested_by_id}`}</strong>
+                            </div>
+                          </div>
+                          <div className="d-flex gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline-success"
+                              onClick={() => handleApproveSuggestion(s.id)}
+                              disabled={suggestionsBusy}
+                              title="Aprobar e invitar"
+                            >
+                              <FiCheck />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline-danger"
+                              onClick={() => handleRefuseSuggestion(s.id)}
+                              disabled={suggestionsBusy}
+                              title="Rechazar"
+                            >
+                              <FiX />
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </>
+                )}
+              </Tab>
+            )}
 
             {/* ─────────── CHAT ─────────── */}
             {isEditMode && (

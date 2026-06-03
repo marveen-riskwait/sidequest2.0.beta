@@ -33,7 +33,22 @@ import {
     FiCheck,
     FiX,
     FiMaximize2,
+    FiFilter,
 } from "react-icons/fi";
+
+// Options for the map time filter (number of days). null = no filter.
+const MAP_FILTER_OPTIONS = [
+    { value: null, label: "Todos" },
+    { value: 1,    label: "Hoy y mañana" },
+    { value: 3,    label: "Próximos 3 días" },
+    { value: 7,    label: "Próxima semana" },
+    { value: 14,   label: "Próximas 2 semanas" },
+    { value: 30,   label: "Próximo mes" },
+    { value: 90,   label: "Próximos 3 meses" },
+];
+
+const labelForFilter = (val) =>
+    MAP_FILTER_OPTIONS.find((o) => o.value === val)?.label || "Todos";
 
 // =====================================================
 // LOCAL HELPERS (inlined so the navbar is self-contained)
@@ -347,6 +362,21 @@ const NAVBAR_CSS = `
 }
 
 /* Hamburger dropdown */
+/* Map-filter toggle — smaller than the rest, sits next to the brand */
+.sq-filter-toggle.dropdown-toggle::after { display: none; }
+.sq-filter-toggle {
+  background: rgba(255,255,255,0.06) !important;
+  border: 1px solid #262a36 !important;
+  border-radius: 999px !important;
+  padding: 0.25rem 0.55rem !important;
+  display: inline-flex !important;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 28px;
+}
+.sq-filter-toggle:hover { background: rgba(255,255,255,0.12) !important; border-color: #6366f1 !important; }
+.sq-filter-toggle:focus { box-shadow: none !important; }
+
 .sq-menu-toggle.dropdown-toggle::after { display: none; }
 .sq-menu-toggle {
   background: transparent !important; border: none !important;
@@ -711,11 +741,56 @@ export const Navbar = () => {
             <NavbarBs variant="dark" className="sq-navbar px-3 py-2 fixed-top">
                 <Container fluid className="d-flex justify-content-between align-items-center">
 
-                    <Link to="/" className="text-decoration-none">
-                        <NavbarBs.Brand className="fw-bold fs-3 mb-0">
-                            <img src="src/front/assets/img/logoSideQuest.png" alt="SideQuest" style={{ filter: "brightness(0) invert(1)", height: "40px", width:"auto" }} />
-                        </NavbarBs.Brand>
-                    </Link>
+                    <div className="d-flex align-items-center gap-2">
+                        <Link to="/" className="text-decoration-none">
+                            <NavbarBs.Brand className="fw-bold fs-3 mb-0">
+                                <img src="src/front/assets/img/logoSideQuest.png" alt="SideQuest" style={{ filter: "brightness(0) invert(1)", height: "40px", width:"auto" }} />
+                            </NavbarBs.Brand>
+                        </Link>
+
+                        {/* MAP TIME FILTER — small, sits right next to the logo.
+                            Only meaningful when logged in. */}
+                        {isLogged && (
+                            <Dropdown align="start">
+                                <Dropdown.Toggle
+                                    as={Button}
+                                    variant="dark"
+                                    className="sq-filter-toggle position-relative border-0 p-1"
+                                    title="Filtrar eventos en el mapa"
+                                >
+                                    <FiFilter size={16} color="white" />
+                                    {store.mapFilterDays !== null && store.mapFilterDays !== undefined && (
+                                        <Badge
+                                            bg="info"
+                                            pill
+                                            className="ms-1"
+                                            style={{ fontSize: "0.55rem", verticalAlign: "middle" }}
+                                        >
+                                            {store.mapFilterDays}d
+                                        </Badge>
+                                    )}
+                                </Dropdown.Toggle>
+                                <Dropdown.Menu className="sq-menu-dropdown">
+                                    <Dropdown.Header>Filtro de eventos</Dropdown.Header>
+                                    <Dropdown.Divider />
+                                    {MAP_FILTER_OPTIONS.map((opt) => {
+                                        const isActive = (store.mapFilterDays ?? null) === opt.value;
+                                        return (
+                                            <Dropdown.Item
+                                                key={String(opt.value)}
+                                                active={isActive}
+                                                onClick={() => dispatch({ type: "set_map_filter_days", payload: opt.value })}
+                                            >
+                                                {isActive && <FiCheck className="me-2" />}
+                                                {!isActive && <span className="me-2" style={{ display: "inline-block", width: 14 }} />}
+                                                {opt.label}
+                                            </Dropdown.Item>
+                                        );
+                                    })}
+                                </Dropdown.Menu>
+                            </Dropdown>
+                        )}
+                    </div>
 
                     <Nav className="d-flex flex-row align-items-center gap-2 gap-md-3">
                         {isLogged ? (
@@ -723,6 +798,17 @@ export const Navbar = () => {
                                 <span className="sq-hide-xs">
                                     <NotificationBell />
                                 </span>
+
+                                {/* FRIENDS — promoted out of the hamburger to a top-level icon */}
+                                <Link to="/friends" className="text-decoration-none">
+                                    <Button
+                                        variant="dark"
+                                        className="border-0 p-2"
+                                        title="Friends"
+                                    >
+                                        <FiUsers size={24} color="white" />
+                                    </Button>
+                                </Link>
 
                                 <Button
                                     variant="dark"
@@ -754,13 +840,11 @@ export const Navbar = () => {
 
                                     <Dropdown.Menu className="sq-menu-dropdown">
                                         <Dropdown.Header>
-                                            Hola {cachedUser?.email || "—"}
+                                            Hola {cachedUser?.username
+                                                ? `@${cachedUser.username}`
+                                                : (cachedUser?.email || "—")}
                                         </Dropdown.Header>
                                         <Dropdown.Divider />
-
-                                        <Dropdown.Item as={Link} to="/friends">
-                                            <FiUsers className="me-2" /> Friends
-                                        </Dropdown.Item>
 
                                         <Dropdown.Item as={Link} to="/events">
                                             <FiCalendar className="me-2" /> Mis Eventos

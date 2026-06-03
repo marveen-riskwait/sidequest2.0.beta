@@ -7,8 +7,10 @@ import {
     FiBell,
     FiUser,
     FiCalendar,
+    FiUserPlus,
     FiCheck,
     FiX,
+    FiHelpCircle,
     FiCheckCircle,
 } from "react-icons/fi";
 
@@ -24,9 +26,8 @@ const authHeaders = () => ({
 const fetchWithRetry = async (url, opts = {}) => {
     let delay = 400;
     for (;;) {
-        try {
-            return await fetch(url, opts);
-        } catch (_) {
+        try { return await fetch(url, opts); }
+        catch (_) {
             await new Promise((r) => setTimeout(r, delay));
             delay = Math.min(delay * 2, 4000);
         }
@@ -48,7 +49,7 @@ const BELL_CSS = `
 .sq-bell-menu {
   background: #161922; border: 1px solid #262a36;
   color: #e9ecef;
-  width: 340px; max-height: 460px;
+  width: 360px; max-height: 480px;
   overflow-y: auto;
   padding: 0;
 }
@@ -91,8 +92,9 @@ const BELL_CSS = `
   display: flex; align-items: center; justify-content: center;
   border: 1px solid #262a36;
 }
-.sq-bell-avatar.friend { background: linear-gradient(135deg, #ec4899, #f97316); color: #fff; }
-.sq-bell-avatar.event  { background: linear-gradient(135deg, #6366f1, #ec4899); color: #fff; }
+.sq-bell-avatar.friend     { background: linear-gradient(135deg, #ec4899, #f97316); color: #fff; }
+.sq-bell-avatar.event      { background: linear-gradient(135deg, #6366f1, #ec4899); color: #fff; }
+.sq-bell-avatar.suggestion { background: linear-gradient(135deg, #facc15, #f97316); color: #fff; }
 
 .sq-bell-body { flex: 1; min-width: 0; }
 .sq-bell-row1 {
@@ -117,11 +119,15 @@ const BELL_CSS = `
   padding: 0.18rem 0.55rem !important;
   display: inline-flex !important; align-items: center; gap: 0.25rem;
 }
-.sq-bell-btn.accept { color: #4ade80 !important; }
-.sq-bell-btn.accept:hover { background: #14532d !important; color: #fff !important; border-color: #22c55e !important; }
+.sq-bell-btn.going  { color: #22d3ee !important; }
+.sq-bell-btn.going:hover  { background: rgba(34,211,238,0.15) !important; color: #fff !important; border-color: #22d3ee !important; }
+.sq-bell-btn.maybe  { color: #facc15 !important; }
+.sq-bell-btn.maybe:hover  { background: rgba(250,204,21,0.15) !important; color: #fff !important; border-color: #facc15 !important; }
 .sq-bell-btn.refuse { color: #ff8a8a !important; }
 .sq-bell-btn.refuse:hover { background: #7f1d1d !important; color: #fff !important; border-color: #ef4444 !important; }
-.sq-bell-btn.plain:hover { background: #262a36 !important; color: #fff !important; }
+.sq-bell-btn.accept { color: #4ade80 !important; }
+.sq-bell-btn.accept:hover { background: #14532d !important; color: #fff !important; border-color: #22c55e !important; }
+.sq-bell-btn.plain:hover  { background: #262a36 !important; color: #fff !important; }
 
 .sq-bell-close {
   background: transparent !important; border: none !important;
@@ -138,13 +144,11 @@ const BELL_CSS = `
 const renderMessage = (n) => {
     const p = n.payload || {};
     const from = p.from_email || "Alguien";
+
     if (n.type === "friend_request") {
-        return (
-            <>
-                <strong>{from}</strong> te envió una solicitud de amistad
-            </>
-        );
+        return (<><strong>{from}</strong> te envió una solicitud de amistad</>);
     }
+
     if (n.type === "event_invite") {
         const title = p.event_title || "un evento";
         const when = [p.event_date, p.event_time].filter(Boolean).join(" ");
@@ -155,6 +159,18 @@ const renderMessage = (n) => {
             </>
         );
     }
+
+    if (n.type === "invite_suggestion") {
+        const title = p.event_title || "tu evento";
+        const target = p.suggested_user_email || "alguien";
+        return (
+            <>
+                <strong>{from}</strong> propone invitar a <strong>{target}</strong>{" "}
+                a "<strong>{title}</strong>"
+            </>
+        );
+    }
+
     return "Tienes una notificación nueva";
 };
 
@@ -162,11 +178,11 @@ const formatTimeAgo = (iso) => {
     if (!iso) return "";
     const t = new Date(iso).getTime();
     if (Number.isNaN(t)) return "";
-    const diffSec = Math.max(0, (Date.now() - t) / 1000);
-    if (diffSec < 60) return "ahora";
-    if (diffSec < 3600) return `${Math.floor(diffSec / 60)} min`;
-    if (diffSec < 86400) return `${Math.floor(diffSec / 3600)} h`;
-    return `${Math.floor(diffSec / 86400)} d`;
+    const diff = Math.max(0, (Date.now() - t) / 1000);
+    if (diff < 60) return "ahora";
+    if (diff < 3600) return `${Math.floor(diff / 60)} min`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)} h`;
+    return `${Math.floor(diff / 86400)} d`;
 };
 
 // =====================================================
@@ -183,8 +199,7 @@ export const NotificationBell = () => {
         fetchNotifications,
     } = useNotifications({ poll: true });
 
-    // Accept / refuse a friend_request via the existing /api/friends endpoints.
-    // Backend deletes the notif server-side; we drop it from local state too.
+    // ----- friend_request -----
     const acceptFriend = async (n) => {
         const fid = (n.payload || {}).friendship_id;
         if (!fid) return;
@@ -192,10 +207,7 @@ export const NotificationBell = () => {
             `${API_URL}/api/friends/requests/${fid}/accept`,
             { method: "PUT", headers: authHeaders() }
         );
-        if (res.ok) {
-            deleteNotification(n.id);
-            fetchNotifications();
-        }
+        if (res.ok) { deleteNotification(n.id); fetchNotifications(); }
     };
 
     const refuseFriend = async (n) => {
@@ -205,44 +217,61 @@ export const NotificationBell = () => {
             `${API_URL}/api/friends/requests/${fid}/refuse`,
             { method: "PUT", headers: authHeaders() }
         );
-        if (res.ok) {
-            deleteNotification(n.id);
-            fetchNotifications();
-        }
+        if (res.ok) { deleteNotification(n.id); fetchNotifications(); }
     };
 
-    // Accept / refuse an event_invite via the new /api/events/<id>/(accept|refuse).
-    // Same pattern: server-side cleanup + local mirror.
-    const acceptEvent = async (n) => {
+    // ----- event_invite (3 buttons via /respond) -----
+    const respondEvent = async (n, response) => {
         const eid = (n.payload || {}).event_id;
         if (!eid) return;
         const res = await fetchWithRetry(
-            `${API_URL}/api/events/${eid}/accept`,
-            { method: "PUT", headers: authHeaders() }
+            `${API_URL}/api/events/${eid}/respond`,
+            {
+                method: "PUT",
+                headers: authHeaders(),
+                body: JSON.stringify({ response }),
+            }
         );
-        if (res.ok) {
-            deleteNotification(n.id);
-            fetchNotifications();
-        }
+        if (res.ok) { deleteNotification(n.id); fetchNotifications(); }
     };
 
-    const refuseEvent = async (n) => {
-        const eid = (n.payload || {}).event_id;
-        if (!eid) return;
+    // ----- invite_suggestion (creator-only actions) -----
+    const approveSuggestion = async (n) => {
+        const p = n.payload || {};
+        if (!p.event_id || !p.suggestion_id) return;
         const res = await fetchWithRetry(
-            `${API_URL}/api/events/${eid}/refuse`,
+            `${API_URL}/api/events/${p.event_id}/suggestions/${p.suggestion_id}/approve`,
             { method: "PUT", headers: authHeaders() }
         );
-        if (res.ok) {
-            deleteNotification(n.id);
-            fetchNotifications();
-        }
+        if (res.ok) { deleteNotification(n.id); fetchNotifications(); }
+    };
+
+    const refuseSuggestion = async (n) => {
+        const p = n.payload || {};
+        if (!p.event_id || !p.suggestion_id) return;
+        const res = await fetchWithRetry(
+            `${API_URL}/api/events/${p.event_id}/suggestions/${p.suggestion_id}/refuse`,
+            { method: "PUT", headers: authHeaders() }
+        );
+        if (res.ok) { deleteNotification(n.id); fetchNotifications(); }
     };
 
     const handleClickNotif = (n) => {
         if (!n.is_read) markAsRead(n.id);
-        if (n.type === "event_invite") navigate("/events");
+        if (n.type === "event_invite" || n.type === "invite_suggestion") navigate("/events");
         else if (n.type === "friend_request") navigate("/friends");
+    };
+
+    const avatarKindFor = (n) => {
+        if (n.type === "friend_request") return "friend";
+        if (n.type === "invite_suggestion") return "suggestion";
+        return "event";
+    };
+
+    const iconFor = (n) => {
+        if (n.type === "friend_request") return <FiUser size={18} />;
+        if (n.type === "invite_suggestion") return <FiUserPlus size={18} />;
+        return <FiCalendar size={18} />;
     };
 
     return (
@@ -258,8 +287,7 @@ export const NotificationBell = () => {
                     <FiBell size={22} />
                     {unreadCount > 0 && (
                         <Badge
-                            bg="danger"
-                            pill
+                            bg="danger" pill
                             className="position-absolute top-0 start-100 translate-middle"
                             style={{ fontSize: "0.6rem" }}
                         >
@@ -275,10 +303,7 @@ export const NotificationBell = () => {
                             <Button
                                 size="sm"
                                 className="sq-bell-mark-all"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    markAllRead();
-                                }}
+                                onClick={(e) => { e.stopPropagation(); markAllRead(); }}
                             >
                                 Marcar todas
                             </Button>
@@ -289,99 +314,82 @@ export const NotificationBell = () => {
                         <div className="sq-bell-empty">No tienes notificaciones</div>
                     ) : (
                         notifications.map((n) => {
-                            const isFriend = n.type === "friend_request";
-                            const isEvent  = n.type === "event_invite";
+                            const isFriend     = n.type === "friend_request";
+                            const isEvent      = n.type === "event_invite";
+                            const isSuggestion = n.type === "invite_suggestion";
+
                             return (
                                 <div
                                     key={n.id}
                                     className={`sq-bell-item ${n.is_read ? "" : "unread"}`}
                                     onClick={() => handleClickNotif(n)}
                                 >
-                                    <div className={`sq-bell-avatar ${isFriend ? "friend" : "event"}`}>
-                                        {isFriend ? <FiUser size={18} /> : <FiCalendar size={18} />}
+                                    <div className={`sq-bell-avatar ${avatarKindFor(n)}`}>
+                                        {iconFor(n)}
                                     </div>
 
                                     <div className="sq-bell-body">
                                         <div className="sq-bell-row1">
-                                            <div className="sq-bell-msg">
-                                                {renderMessage(n)}
-                                            </div>
-                                            <div className="sq-bell-time">
-                                                {formatTimeAgo(n.created_at)}
-                                            </div>
+                                            <div className="sq-bell-msg">{renderMessage(n)}</div>
+                                            <div className="sq-bell-time">{formatTimeAgo(n.created_at)}</div>
                                         </div>
 
                                         <div className="sq-bell-actions">
                                             {isFriend && (
                                                 <>
-                                                    <Button
-                                                        size="sm"
-                                                        className="sq-bell-btn accept"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            acceptFriend(n);
-                                                        }}
-                                                    >
+                                                    <Button size="sm" className="sq-bell-btn accept"
+                                                        onClick={(e) => { e.stopPropagation(); acceptFriend(n); }}>
                                                         <FiCheck /> Aceptar
                                                     </Button>
-                                                    <Button
-                                                        size="sm"
-                                                        className="sq-bell-btn refuse"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            refuseFriend(n);
-                                                        }}
-                                                    >
+                                                    <Button size="sm" className="sq-bell-btn refuse"
+                                                        onClick={(e) => { e.stopPropagation(); refuseFriend(n); }}>
                                                         <FiX /> Rechazar
                                                     </Button>
                                                 </>
                                             )}
+
                                             {isEvent && (
                                                 <>
-                                                    <Button
-                                                        size="sm"
-                                                        className="sq-bell-btn accept"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            acceptEvent(n);
-                                                        }}
-                                                    >
-                                                        <FiCheck /> Aceptar
+                                                    <Button size="sm" className="sq-bell-btn going"
+                                                        onClick={(e) => { e.stopPropagation(); respondEvent(n, "going"); }}
+                                                        title="Voy">
+                                                        <FiCheckCircle /> Voy
                                                     </Button>
-                                                    <Button
-                                                        size="sm"
-                                                        className="sq-bell-btn refuse"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            refuseEvent(n);
-                                                        }}
-                                                    >
+                                                    <Button size="sm" className="sq-bell-btn maybe"
+                                                        onClick={(e) => { e.stopPropagation(); respondEvent(n, "maybe"); }}
+                                                        title="Tal vez">
+                                                        <FiHelpCircle /> Tal vez
+                                                    </Button>
+                                                    <Button size="sm" className="sq-bell-btn refuse"
+                                                        onClick={(e) => { e.stopPropagation(); respondEvent(n, "not_going"); }}
+                                                        title="No voy">
+                                                        <FiX /> No voy
+                                                    </Button>
+                                                </>
+                                            )}
+
+                                            {isSuggestion && (
+                                                <>
+                                                    <Button size="sm" className="sq-bell-btn accept"
+                                                        onClick={(e) => { e.stopPropagation(); approveSuggestion(n); }}>
+                                                        <FiCheck /> Aprobar
+                                                    </Button>
+                                                    <Button size="sm" className="sq-bell-btn refuse"
+                                                        onClick={(e) => { e.stopPropagation(); refuseSuggestion(n); }}>
                                                         <FiX /> Rechazar
                                                     </Button>
                                                 </>
                                             )}
+
                                             {!n.is_read && (
-                                                <Button
-                                                    size="sm"
-                                                    className="sq-bell-btn plain"
+                                                <Button size="sm" className="sq-bell-btn plain"
                                                     title="Marcar como leída"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        markAsRead(n.id);
-                                                    }}
-                                                >
+                                                    onClick={(e) => { e.stopPropagation(); markAsRead(n.id); }}>
                                                     <FiCheckCircle />
                                                 </Button>
                                             )}
-                                            <Button
-                                                size="sm"
-                                                className="sq-bell-close"
-                                                title="Eliminar"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    deleteNotification(n.id);
-                                                }}
-                                            >
+                                            <Button size="sm" className="sq-bell-close" title="Eliminar"
+                                                onClick={(e) => { e.stopPropagation(); deleteNotification(n.id); }}>
                                                 <FiX />
                                             </Button>
                                         </div>

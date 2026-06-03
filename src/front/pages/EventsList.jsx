@@ -44,11 +44,13 @@ const handle = async (res) => {
 const apiListEvents = () =>
   fetch(`${API}/api/events`, { headers: authHeaders() }).then(handle);
 
-const apiRsvp = (eventId, rsvp) =>
-  fetch(`${API}/api/events/${eventId}/rsvp`, {
-    method: "PATCH",
+// Unified response (going/maybe/not_going). Works for invitees (joins them
+// or declines the invitation) AND participants (just updates rsvp).
+const apiRespond = (eventId, response) =>
+  fetch(`${API}/api/events/${eventId}/respond`, {
+    method: "PUT",
     headers: authHeaders(),
-    body: JSON.stringify({ rsvp }),
+    body: JSON.stringify({ response }),
   }).then(handle);
 
 const CSS = `
@@ -138,36 +140,45 @@ const CSS = `
 .rsvp-btn.active-maybe     { background: rgba(250,204,21,0.15);  border-color: #facc15; color: #facc15; }
 .rsvp-btn.active-not_going { background: rgba(244,63,94,0.15);   border-color: #f43f5e; color: #f43f5e; }
 .rsvp-btn:disabled { opacity: 0.45; pointer-events: none; }
+
+/* Status pill in card top-right */
+.status-pill {
+  font-size: 0.65rem !important;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.status-pill.pending  { background: #facc15 !important; color: #0b0d12 !important; }
+.status-pill.accepted { background: #4f46e5 !important; }
+.status-pill.creator  { background: #22d3ee !important; color: #0b0d12 !important; }
 `;
 
 // =============================================================
-// RSVP OPTIONS
+// RESPONSE OPTIONS
 // =============================================================
-const RSVP_OPTIONS = [
-  { value: "going",     label: "Going",     icon: <FiCheckCircle size={12} /> },
-  { value: "maybe",     label: "Maybe",     icon: <FiHelpCircle  size={12} /> },
-  { value: "not_going", label: "Not going", icon: <FiXCircle     size={12} /> },
+const RESPONSE_OPTIONS = [
+  { value: "going",     label: "Voy",     icon: <FiCheckCircle size={12} /> },
+  { value: "maybe",     label: "Tal vez", icon: <FiHelpCircle  size={12} /> },
+  { value: "not_going", label: "No voy",  icon: <FiXCircle     size={12} /> },
 ];
 
 // =============================================================
-// RSVP BAR — self-contained, stops click propagation so it
+// RESPONSE BAR — self-contained, stops click propagation so it
 // doesn't open the modal when the user clicks a button
 // =============================================================
-const RsvpBar = ({ eventId, initialRsvp, onRsvpChange }) => {
+const ResponseBar = ({ eventId, myStatus, initialRsvp, onChanged }) => {
   const [rsvp, setRsvp]     = useState(initialRsvp || null);
   const [saving, setSaving] = useState(false);
 
   const handleClick = async (e, value) => {
-    e.stopPropagation(); // prevent card click → modal open
+    e.stopPropagation();
     if (saving) return;
-
-    // clicking the active button clears it (toggle)
-    const next = rsvp === value ? null : value;
     setSaving(true);
     try {
-      await apiRsvp(eventId, next);
+      const data = await apiRespond(eventId, value);
+      // /respond returns the updated event — pull my_rsvp from it.
+      const next = data?.event?.my_rsvp ?? value;
       setRsvp(next);
-      if (onRsvpChange) onRsvpChange(eventId, next);
+      if (onChanged) onChanged(eventId, data?.event || null);
     } catch {
       // silently ignore — the button just stays where it was
     } finally {
@@ -177,12 +188,17 @@ const RsvpBar = ({ eventId, initialRsvp, onRsvpChange }) => {
 
   return (
     <div className="rsvp-bar" onClick={(e) => e.stopPropagation()}>
-      {RSVP_OPTIONS.map((opt) => (
+      {RESPONSE_OPTIONS.map((opt) => (
         <button
           key={opt.value}
           className={`rsvp-btn${rsvp === opt.value ? ` active-${opt.value}` : ""}`}
           disabled={saving}
           onClick={(e) => handleClick(e, opt.value)}
+          title={
+            myStatus === "pending"
+              ? (opt.value === "not_going" ? "Rechazar invitación" : `Aceptar (${opt.label})`)
+              : opt.label
+          }
         >
           {opt.icon} {opt.label}
         </button>
@@ -201,7 +217,6 @@ export const EventsList = () => {
   const [tab, setTab]         = useState("all");
   const [searchQ, setSearchQ] = useState("");
 
-  // EventModal
   const [modalOpen, setModalOpen]         = useState(false);
   const [activeEventId, setActiveEventId] = useState(null);
 
@@ -227,14 +242,19 @@ export const EventsList = () => {
   const openCreate = ()    => { setActiveEventId(null); setModalOpen(true); };
   const closeModal = ()    => { setModalOpen(false); setActiveEventId(null); };
 
-  // Update rsvp on a single event in state without a full reload
-  const handleRsvpChange = (eventId, newRsvp) => {
-    setEvents((prev) =>
-      prev.map((ev) => ev.id === eventId ? { ...ev, my_rsvp: newRsvp } : ev)
-    );
+  // Patch a single event in state with the updated payload returned by
+  // /respond. Falls back to a full reload when the backend payload is
+  // missing the my_status hint (e.g. after declining an invitation).
+  const handleRespondChanged = (eventId, updatedEvent) => {
+    if (!updatedEvent) { reload(); return; }
+    setEvents((prev) => {
+      // Was this a "decline invitation" (no longer in participants and not pending)?
+      const stillThere = updatedEvent.my_status !== "none";
+      if (!stillThere) return prev.filter((e) => e.id !== eventId);
+      return prev.map((ev) => ev.id === eventId ? { ...ev, ...updatedEvent } : ev);
+    });
   };
 
-  // ---- derived ----
   const isPast = (e) => {
     if (!e?.date) return false;
     const d = new Date(e.date);
@@ -242,13 +262,14 @@ export const EventsList = () => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     d.setHours(0, 0, 0, 0);
-    return d <= today;
+    return d < today;
   };
 
   const filtered = useMemo(() => {
     let list = events;
-    if (tab === "created")      list = list.filter((e) => e.creator_id === myId);
-    if (tab === "participated") list = list.filter((e) => isPast(e));
+    if (tab === "created")  list = list.filter((e) => e.creator_id === myId);
+    if (tab === "pending")  list = list.filter((e) => e.my_status === "pending");
+    if (tab === "past")     list = list.filter((e) => isPast(e));
 
     const q = searchQ.trim().toLowerCase();
     if (q) {
@@ -262,24 +283,30 @@ export const EventsList = () => {
   }, [events, tab, searchQ, myId]);
 
   const counts = useMemo(() => ({
-    all:          events.length,
-    created:      events.filter((e) => e.creator_id === myId).length,
-    participated: events.filter((e) => isPast(e)).length,
+    all:     events.length,
+    created: events.filter((e) => e.creator_id === myId).length,
+    pending: events.filter((e) => e.my_status === "pending").length,
+    past:    events.filter((e) => isPast(e)).length,
   }), [events, myId]);
 
-  // Does the current user participate in this event (but is NOT the creator)?
-  const isInvitedParticipant = (e) =>
+  // Show the response bar for: invitees (my_status==="pending") AND
+  // accepted participants who aren't the creator.
+  const showResponseBar = (e) =>
     e.creator_id !== myId &&
-    Array.isArray(e.participants) &&
-    e.participants.some((p) => p.id === myId);
+    (e.my_status === "pending" || e.my_status === "accepted");
+
+  const statusPill = (e) => {
+    if (e.creator_id === myId) return <Badge className="status-pill creator">Creator</Badge>;
+    if (e.my_status === "pending")  return <Badge className="status-pill pending">Invitado</Badge>;
+    if (e.my_status === "accepted") return <Badge className="status-pill accepted">Voy</Badge>;
+    return <Badge bg="secondary">—</Badge>;
+  };
 
   return (
     <div className="events-list-page">
       <style>{CSS}</style>
 
       <Container className="py-4">
-
-        {/* HEADER */}
         <div className="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-4">
           <div>
             <h1 className="text-light mb-1 d-flex align-items-center gap-2">
@@ -300,7 +327,6 @@ export const EventsList = () => {
           </Alert>
         )}
 
-        {/* SEARCH */}
         <Card className="event-card mb-4" style={{ cursor: "default" }}>
           <Card.Body>
             <InputGroup>
@@ -321,14 +347,13 @@ export const EventsList = () => {
           </Card.Body>
         </Card>
 
-        {/* TABS */}
         <Tabs activeKey={tab} onSelect={(k) => setTab(k)} className="mb-3" fill>
-          <Tab eventKey="all"          title={<span>All          <Badge bg="secondary">{counts.all}</Badge></span>} />
-          <Tab eventKey="created"      title={<span>Created      <Badge bg="secondary">{counts.created}</Badge></span>} />
-          <Tab eventKey="participated" title={<span>Participated <Badge bg="secondary">{counts.participated}</Badge></span>} />
+          <Tab eventKey="all"     title={<span>All     <Badge bg="secondary">{counts.all}</Badge></span>} />
+          <Tab eventKey="created" title={<span>Created <Badge bg="secondary">{counts.created}</Badge></span>} />
+          <Tab eventKey="pending" title={<span>Invitado <Badge bg="warning" text="dark">{counts.pending}</Badge></span>} />
+          <Tab eventKey="past"    title={<span>Past    <Badge bg="secondary">{counts.past}</Badge></span>} />
         </Tabs>
 
-        {/* CONTENT */}
         {loading ? (
           <div className="text-center py-5 text-secondary">
             <Spinner animation="border" />
@@ -364,11 +389,7 @@ export const EventsList = () => {
                       <strong className="text-light text-truncate">
                         {e.title || "(untitled event)"}
                       </strong>
-                      {e.creator_id === myId ? (
-                        <Badge bg="info">Creator</Badge>
-                      ) : (
-                        <Badge bg="secondary">Invited</Badge>
-                      )}
+                      {statusPill(e)}
                     </div>
 
                     <div className="event-meta mb-1">
@@ -381,14 +402,19 @@ export const EventsList = () => {
                     )}
                     <div className="event-meta">
                       <FiUsers /> {e.participants_count} participant{e.participants_count !== 1 ? "s" : ""}
+                      {e.going_count > 0 && (
+                        <span className="ms-2 small text-info">
+                          ({e.going_count} voy)
+                        </span>
+                      )}
                     </div>
 
-                    {/* RSVP bar — only shown to invited participants, not the creator */}
-                    {isInvitedParticipant(e) && (
-                      <RsvpBar
+                    {showResponseBar(e) && (
+                      <ResponseBar
                         eventId={e.id}
+                        myStatus={e.my_status}
                         initialRsvp={e.my_rsvp}
-                        onRsvpChange={handleRsvpChange}
+                        onChanged={handleRespondChanged}
                       />
                     )}
                   </Card.Body>

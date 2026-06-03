@@ -1,6 +1,4 @@
-from enum import Enum
-from datetime import datetime, timezone
-from typing import List, Optional
+from datetime import datetime
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import (
     String, Boolean, Float, ForeignKey, Table, Column, Text,
@@ -56,7 +54,7 @@ class User(db.Model):
         }
 
     def public_brief(self):
-        """Versión reducida para chat (sin info sensible)."""
+        """Versión reducida (sin info sensible)."""
         return {
             "id":                  self.id,
             "username":            self.username,
@@ -79,7 +77,7 @@ class Event(db.Model):
     latitude:   Mapped[float] = mapped_column(Float,       nullable=True)
     longitude:  Mapped[float] = mapped_column(Float,       nullable=True)
     details:    Mapped[str]   = mapped_column(Text,        nullable=True)
-    image: Mapped[str] = mapped_column(Text, nullable=True)
+    image:      Mapped[str]   = mapped_column(Text, nullable=True)
     creator_id: Mapped[int]   = mapped_column(ForeignKey("user.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=True, default=datetime.utcnow)
 
@@ -94,26 +92,47 @@ class Event(db.Model):
         cascade="all, delete-orphan",
         lazy="selectin",
     )
+    suggestions:  Mapped[list["InviteSuggestion"]] = relationship(
+        "InviteSuggestion",
+        foreign_keys="InviteSuggestion.event_id",
+        back_populates="event",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
-    def serialize(self, current_user_id=None):
-        # Build a lookup of rsvp values from the association table
+    def serialize(self, current_user_id=None, rsvp_map=None):
+        """Serialise the event.
+
+        `rsvp_map` (optional): a dict {user_id: rsvp_value} for THIS event's
+        participants, pre-computed by the caller. When passed, we skip the
+        per-event SQL query — used by `get_events` to avoid N+1 queries
+        when serialising many events at once.
+        """
         from sqlalchemy import text
-        rsvp_map = {}
-        rows = db.session.execute(
-            text("SELECT user_id, rsvp FROM event_participants WHERE event_id = :eid"),
-            {"eid": self.id}
-        ).fetchall()
-        for row in rows:
-            rsvp_map[row[0]] = row[1]
+        if rsvp_map is None:
+            rsvp_map = {}
+            rows = db.session.execute(
+                text("SELECT user_id, rsvp FROM event_participants WHERE event_id = :eid"),
+                {"eid": self.id}
+            ).fetchall()
+            for row in rows:
+                rsvp_map[row[0]] = row[1]
 
         participants_data = [
             {
-                "id":    p.id,
-                "email": p.email,
-                "rsvp":  rsvp_map.get(p.id),
+                "id":                  p.id,
+                "email":               p.email,
+                "username":            p.username,
+                "profile_picture_url": p.profile_picture_url,
+                "rsvp":                rsvp_map.get(p.id),
             }
             for p in self.participants
         ]
+
+        # Count "going" responses — used by the map marker badge.
+        going_count = sum(1 for v in rsvp_map.values() if v == "going")
+
+        creator_picture = self.creator.profile_picture_url if self.creator else None
 
         data = {
             "id":                 self.id,
@@ -126,14 +145,64 @@ class Event(db.Model):
             "details":            self.details,
             "image":              self.image,
             "creator_id":         self.creator_id,
-            "creator_email":      self.creator.email,
+            "creator_email":      self.creator.email if self.creator else None,
+            "creator_username":   self.creator.username if self.creator else None,
+            "creator_picture":    creator_picture,
             "participants":       participants_data,
             "participants_count": len(self.participants),
-            "created_at":         self.created_at.isoformat() if self.created_at else None,
+            "going_count":        going_count,
+            "pending_invitations": [
+                {
+                    "id":         inv.id,
+                    "user_id":    inv.user_id,
+                    "user_email": inv.user.email if inv.user else None,
+                    "inviter_id": inv.inviter_id,
+                }
+                for inv in (self.invitations or [])
+            ],
+            "pending_invitations_count": len(self.invitations or []),
+            "created_at":         self.created_at.isoformat() + "Z" if self.created_at else None,
         }
 
         if current_user_id is not None:
             data["my_rsvp"] = rsvp_map.get(current_user_id)
+
+            if current_user_id == self.creator_id:
+                data["my_status"] = "creator"
+            elif current_user_id in [p.id for p in self.participants]:
+                data["my_status"] = "accepted"
+            elif any(inv.user_id == current_user_id for inv in (self.invitations or [])):
+                data["my_status"] = "pending"
+            else:
+                data["my_status"] = "none"
+
+            my_inv = next(
+                (inv for inv in (self.invitations or []) if inv.user_id == current_user_id),
+                None,
+            )
+            data["my_invitation_id"] = my_inv.id if my_inv else None
+
+            # The creator also sees pending invite-suggestions from participants.
+            if current_user_id == self.creator_id:
+                data["pending_suggestions"] = [
+                    {
+                        "id":                  s.id,
+                        "suggested_user_id":   s.suggested_user_id,
+                        "suggested_user_email":
+                            s.suggested_user.email if s.suggested_user else None,
+                        "suggested_user_username":
+                            s.suggested_user.username if s.suggested_user else None,
+                        "suggested_user_picture":
+                            s.suggested_user.profile_picture_url if s.suggested_user else None,
+                        "suggested_by_id":     s.suggested_by_id,
+                        "suggested_by_email":
+                            s.suggested_by.email if s.suggested_by else None,
+                        "created_at":
+                            s.created_at.isoformat() + "Z" if s.created_at else None,
+                    }
+                    for s in (self.suggestions or [])
+                ]
+                data["pending_suggestions_count"] = len(self.suggestions or [])
 
         return data
 
@@ -182,6 +251,9 @@ class Friendship(db.Model):
 
 
 # ── EVENT INVITATION ─────────────────────────────────────────
+# Pending invitations sent by the event creator (or auto-converted from a
+# participant's accepted suggestion). When the invitee accepts/maybe →
+# they join participants and this row is deleted. When refused → deleted.
 class EventInvitation(db.Model):
     __tablename__ = "event_invitation"
 
@@ -206,6 +278,38 @@ class EventInvitation(db.Model):
             "user_id":    self.user_id,
             "inviter_id": self.inviter_id,
             "created_at": self.created_at.isoformat() + "Z" if self.created_at else None,
+        }
+
+
+# ── INVITE SUGGESTION ──────────────────────────────────────
+# A participant (non-creator) can suggest inviting one of their friends to
+# the event. The creator then approves or refuses each suggestion. Once
+# approved, the suggestion is converted into a real EventInvitation and
+# this row is deleted.
+class InviteSuggestion(db.Model):
+    __tablename__ = "invite_suggestion"
+
+    id:                Mapped[int] = mapped_column(primary_key=True)
+    event_id:          Mapped[int] = mapped_column(ForeignKey("event.id"), nullable=False, index=True)
+    suggested_user_id: Mapped[int] = mapped_column(ForeignKey("user.id"),  nullable=False, index=True)
+    suggested_by_id:   Mapped[int] = mapped_column(ForeignKey("user.id"),  nullable=False, index=True)
+    created_at:        Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    event:          Mapped["Event"] = relationship("Event", foreign_keys=[event_id], back_populates="suggestions")
+    suggested_user: Mapped["User"]  = relationship("User",  foreign_keys=[suggested_user_id])
+    suggested_by:   Mapped["User"]  = relationship("User",  foreign_keys=[suggested_by_id])
+
+    __table_args__ = (
+        UniqueConstraint("event_id", "suggested_user_id", name="uq_invite_suggestion_pair"),
+    )
+
+    def serialize(self):
+        return {
+            "id":                self.id,
+            "event_id":          self.event_id,
+            "suggested_user_id": self.suggested_user_id,
+            "suggested_by_id":   self.suggested_by_id,
+            "created_at":        self.created_at.isoformat() + "Z" if self.created_at else None,
         }
 
 
@@ -236,7 +340,6 @@ class ChatRoom(db.Model):
     )
 
     def serialize(self, current_user_id=None):
-        # Pick the last *visible* (non-deleted) message as preview
         last = next(
             (m for m in reversed(self.messages) if not m.deleted),
             None,
@@ -255,7 +358,6 @@ class ChatRoom(db.Model):
                 "deleted":      last.deleted,
             }
 
-        # unread count — deleted messages don't count
         unread_count = 0
         if current_user_id is not None:
             membership = next(
@@ -338,9 +440,6 @@ class ChatRoomMembership(db.Model):
 
 
 # ── CHAT MESSAGE ──────────────────────────────────────────
-# Now supports soft-delete via the `deleted` flag. A deleted message keeps
-# its row (for thread positioning) but the content is hidden in serialize().
-# The CheckConstraint lets text/media be NULL only when deleted.
 class ChatMessage(db.Model):
     __tablename__ = "chat_message"
 
@@ -360,8 +459,6 @@ class ChatMessage(db.Model):
     sender: Mapped["User"]     = relationship("User", foreign_keys=[sender_id])
 
     __table_args__ = (
-        # New rule: a non-deleted message must carry text or media.
-        # A deleted message is allowed to have both NULL.
         CheckConstraint(
             "deleted = TRUE OR (text IS NOT NULL) OR (media_url IS NOT NULL)",
             name="ck_chat_message_payload",
@@ -401,6 +498,13 @@ class ChatMessage(db.Model):
 
 
 # ── NOTIFICATION ──────────────────────────────────────────
+# Types currently emitted:
+#   - "friend_request"     payload: {friendship_id, from_user_id, from_email}
+#   - "event_invite"       payload: {event_id, invitation_id, from_user_id,
+#                                    from_email, event_title, event_date, event_time}
+#   - "invite_suggestion"  payload: {event_id, suggestion_id, suggested_user_id,
+#                                    suggested_user_email, from_user_id, from_email,
+#                                    event_title}
 class Notification(db.Model):
     __tablename__ = "notification"
 
@@ -415,7 +519,7 @@ class Notification(db.Model):
 
     __table_args__ = (
         CheckConstraint(
-            "type IN ('friend_request', 'event_invite')",
+            "type IN ('friend_request', 'event_invite', 'invite_suggestion')",
             name="ck_notification_type",
         ),
         Index("ix_notification_user_read", "user_id", "is_read"),

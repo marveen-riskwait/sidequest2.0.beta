@@ -1,8 +1,8 @@
 """empty message
 
-Revision ID: 516944e547a2
+Revision ID: 859dd5305d4b
 Revises: 
-Create Date: 2026-06-03 17:57:02.637204
+Create Date: 2026-06-03 19:20:10.141913
 
 """
 from alembic import op
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '516944e547a2'
+revision = '859dd5305d4b'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -76,7 +76,7 @@ def upgrade():
     sa.Column('payload', sa.JSON(), nullable=False),
     sa.Column('is_read', sa.Boolean(), nullable=False),
     sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.CheckConstraint("type IN ('friend_request', 'event_invite')", name='ck_notification_type'),
+    sa.CheckConstraint("type IN ('friend_request', 'event_invite', 'invite_suggestion')", name='ck_notification_type'),
     sa.ForeignKeyConstraint(['user_id'], ['user.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
@@ -128,6 +128,23 @@ def upgrade():
     sa.ForeignKeyConstraint(['user_id'], ['user.id'], ),
     sa.PrimaryKeyConstraint('event_id', 'user_id')
     )
+    op.create_table('invite_suggestion',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('event_id', sa.Integer(), nullable=False),
+    sa.Column('suggested_user_id', sa.Integer(), nullable=False),
+    sa.Column('suggested_by_id', sa.Integer(), nullable=False),
+    sa.Column('created_at', sa.DateTime(), nullable=False),
+    sa.ForeignKeyConstraint(['event_id'], ['event.id'], ),
+    sa.ForeignKeyConstraint(['suggested_by_id'], ['user.id'], ),
+    sa.ForeignKeyConstraint(['suggested_user_id'], ['user.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('event_id', 'suggested_user_id', name='uq_invite_suggestion_pair')
+    )
+    with op.batch_alter_table('invite_suggestion', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_invite_suggestion_event_id'), ['event_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_invite_suggestion_suggested_by_id'), ['suggested_by_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_invite_suggestion_suggested_user_id'), ['suggested_user_id'], unique=False)
+
     op.create_table('chat_message',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('room_id', sa.Integer(), nullable=False),
@@ -176,6 +193,12 @@ def downgrade():
         batch_op.drop_index(batch_op.f('ix_chat_message_room_id'))
 
     op.drop_table('chat_message')
+    with op.batch_alter_table('invite_suggestion', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_invite_suggestion_suggested_user_id'))
+        batch_op.drop_index(batch_op.f('ix_invite_suggestion_suggested_by_id'))
+        batch_op.drop_index(batch_op.f('ix_invite_suggestion_event_id'))
+
+    op.drop_table('invite_suggestion')
     op.drop_table('event_participants')
     with op.batch_alter_table('event_invitation', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_event_invitation_user_id'))

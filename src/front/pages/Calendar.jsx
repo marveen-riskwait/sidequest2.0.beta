@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Spinner, Alert } from "react-bootstrap";
-import { FiChevronLeft, FiChevronRight, FiCalendar, FiClock, FiMapPin, FiPlus } from "react-icons/fi";
+import {
+  FiChevronLeft, FiChevronRight, FiCalendar, FiClock, FiMapPin,
+  FiPlus, FiCheckCircle, FiHelpCircle, FiXCircle,
+} from "react-icons/fi";
 import { EventModal } from "../components/EventModal";
 
 // ─── API ─────────────────────────────────────────────────────────────────────
@@ -17,7 +20,15 @@ const handle = async (res) => {
 const apiListEvents = () =>
   fetch(`${API}/api/events`, { headers: authHeaders() }).then(handle);
 
-// ─── COLOUR PALETTE (cycles per event, like the screenshot) ──────────────────
+// Unified response (going/maybe/not_going). Joins invitees automatically.
+const apiRespond = (eventId, response) =>
+  fetch(`${API}/api/events/${eventId}/respond`, {
+    method: "PUT",
+    headers: authHeaders(),
+    body: JSON.stringify({ response }),
+  }).then(handle);
+
+// ─── COLOUR PALETTE ──────────────────────────────────────────────────────────
 const PALETTE = ["#a855f7", "#f97316", "#22d3ee", "#34d399", "#f43f5e", "#facc15", "#60a5fa"];
 const eventColor = (idx) => PALETTE[idx % PALETTE.length];
 
@@ -61,8 +72,10 @@ export const Calendar = () => {
   const [selectedDate, setSelectedDate] = useState(null);
   const [modalOpen, setModalOpen]       = useState(false);
   const [activeEventId, setActiveEventId] = useState(null);
+  const [busyEventId, setBusyEventId]   = useState(null);
 
   const currentUser = JSON.parse(localStorage.getItem("user") || "null");
+  const myId = currentUser?.id;
 
   const reload = async () => {
     setLoading(true);
@@ -106,7 +119,33 @@ export const Calendar = () => {
   const openCreate = ()    => { setActiveEventId(null); setModalOpen(true); };
   const closeModal = ()    => { setModalOpen(false); setActiveEventId(null); };
 
+  const handleRespond = async (eventId, value, evt) => {
+    evt?.stopPropagation();
+    if (busyEventId) return;
+    setBusyEventId(eventId);
+    try {
+      const data = await apiRespond(eventId, value);
+      const updated = data?.event;
+      setEvents((prev) => {
+        // Declined invitation → remove from list (no longer visible)
+        if (updated && updated.my_status === "none") {
+          return prev.filter((e) => e.id !== eventId);
+        }
+        return prev.map((e) => e.id === eventId ? { ...e, ...(updated || {}) } : e);
+      });
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusyEventId(null);
+    }
+  };
+
   const selectedEvents = selectedDate ? (byDate[selectedDate] || []) : [];
+
+  // Show response bar for invitees and accepted non-creators.
+  const showResponseBar = (e) =>
+    e.creator_id !== myId &&
+    (e.my_status === "pending" || e.my_status === "accepted");
 
   return (
     <div style={S.page}>
@@ -132,19 +171,16 @@ export const Calendar = () => {
       ) : (
         <div style={S.wrap}>
 
-          {/* MONTH NAV */}
           <div style={S.monthNav}>
             <button style={S.navBtn} onClick={prevMonth}><FiChevronLeft size={20} /></button>
             <span style={S.monthLabel}>{MONTHS[viewMonth]} {viewYear}</span>
             <button style={S.navBtn} onClick={nextMonth}><FiChevronRight size={20} /></button>
           </div>
 
-          {/* DAY NAMES */}
           <div style={S.dayNames}>
             {DAYS.map(d => <div key={d} style={S.dayName}>{d}</div>)}
           </div>
 
-          {/* GRID */}
           <div style={S.grid}>
             {cells.map((cell, i) => {
               const evs        = cell.date ? (byDate[cell.date] || []) : [];
@@ -172,7 +208,7 @@ export const Calendar = () => {
                   {evs.slice(0, 2).map(ev => (
                     <div
                       key={ev.id}
-                      className="cal-pill"
+                      className={`cal-pill ${ev.my_status === "pending" ? "cal-pill-pending" : ""}`}
                       style={{ borderLeftColor: eventColor(colorMap[ev.id]) }}
                       onClick={(e) => { e.stopPropagation(); openEvent(ev.id); }}
                     >
@@ -189,7 +225,6 @@ export const Calendar = () => {
             })}
           </div>
 
-          {/* SELECTED DAY PANEL */}
           {selectedDate && (
             <div style={S.panel}>
               <div style={S.panelHead}>
@@ -214,7 +249,15 @@ export const Calendar = () => {
                     onClick={() => openEvent(ev.id)}
                   >
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={S.eventTitle}>{ev.title || "(untitled)"}</div>
+                      <div style={S.eventTitle}>
+                        {ev.title || "(untitled)"}
+                        {ev.my_status === "pending" && (
+                          <span style={S.pendingTag}>Invitado</span>
+                        )}
+                        {ev.creator_id === myId && (
+                          <span style={S.creatorTag}>Creator</span>
+                        )}
+                      </div>
                       <div style={S.eventMeta}>
                         <FiClock size={11} />
                         <span>{ev.time}</span>
@@ -225,6 +268,32 @@ export const Calendar = () => {
                           </>
                         )}
                       </div>
+
+                      {showResponseBar(ev) && (
+                        <div className="cal-rsvp" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            className={`cal-rsvp-btn going ${ev.my_rsvp === "going" ? "active" : ""}`}
+                            disabled={busyEventId === ev.id}
+                            onClick={(e) => handleRespond(ev.id, "going", e)}
+                          >
+                            <FiCheckCircle size={11} /> Voy
+                          </button>
+                          <button
+                            className={`cal-rsvp-btn maybe ${ev.my_rsvp === "maybe" ? "active" : ""}`}
+                            disabled={busyEventId === ev.id}
+                            onClick={(e) => handleRespond(ev.id, "maybe", e)}
+                          >
+                            <FiHelpCircle size={11} /> Tal vez
+                          </button>
+                          <button
+                            className={`cal-rsvp-btn not_going ${ev.my_rsvp === "not_going" ? "active" : ""}`}
+                            disabled={busyEventId === ev.id}
+                            onClick={(e) => handleRespond(ev.id, "not_going", e)}
+                          >
+                            <FiXCircle size={11} /> No voy
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))
@@ -280,18 +349,26 @@ const S = {
   addBtn:     { background: "linear-gradient(135deg,#6366f1,#4f46e5)", border: "none", color: "#fff", borderRadius: 8, padding: "5px 12px", fontSize: "0.8rem", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 },
   empty:      { color: "#6c757d", fontSize: "0.9rem", margin: 0 },
   eventRow:   { display: "flex", alignItems: "flex-start", gap: 10, padding: "0.6rem 0.75rem", borderRadius: 10, cursor: "pointer", marginBottom: 4, borderLeft: "3px solid transparent", background: "#0f111a" },
-  eventTitle: { fontWeight: 600, color: "#e9ecef", fontSize: "0.9rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  eventTitle: { fontWeight: 600, color: "#e9ecef", fontSize: "0.9rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center", gap: 6 },
   eventMeta:  { display: "flex", alignItems: "center", gap: 4, color: "#6c757d", fontSize: "0.78rem", marginTop: 2 },
   loc:        { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 120 },
+  pendingTag: {
+    fontSize: "0.6rem", padding: "1px 6px", borderRadius: 999,
+    background: "#facc15", color: "#0b0d12", fontWeight: 700,
+    textTransform: "uppercase", letterSpacing: "0.04em",
+  },
+  creatorTag: {
+    fontSize: "0.6rem", padding: "1px 6px", borderRadius: 999,
+    background: "#22d3ee", color: "#0b0d12", fontWeight: 700,
+    textTransform: "uppercase", letterSpacing: "0.04em",
+  },
 };
 
-// ─── CSS ──────────────────────────────────────────────────────────────────────
 const CSS = `
 .cal-cell {
   min-height: 80px;
   display: flex;
   flex-direction: column;
-  align-items: stretch;
   padding: 4px 3px;
   border-radius: 8px;
   cursor: pointer;
@@ -330,6 +407,10 @@ const CSS = `
   transition: background 0.12s;
 }
 .cal-pill:hover { background: rgba(255,255,255,0.12); }
+.cal-pill-pending {
+  border-left-color: #facc15 !important;
+  background: rgba(250,204,21,0.08) !important;
+}
 .cal-pill-title {
   font-size: 0.68rem;
   font-weight: 600;
@@ -352,4 +433,25 @@ const CSS = `
 }
 .cal-event-row { transition: background 0.12s; }
 .cal-event-row:hover { background: #1e2230 !important; }
+
+/* Response bar for the day-panel events */
+.cal-rsvp { display: flex; gap: 4px; margin-top: 8px; }
+.cal-rsvp-btn {
+  flex: 1;
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid #262a36;
+  background: #0f111a;
+  color: #6c757d;
+  font-size: 0.7rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.cal-rsvp-btn:hover { background: #1e2230; color: #e9ecef; }
+.cal-rsvp-btn.active.going     { background: rgba(34,211,238,0.15); border-color: #22d3ee; color: #22d3ee; }
+.cal-rsvp-btn.active.maybe     { background: rgba(250,204,21,0.15); border-color: #facc15; color: #facc15; }
+.cal-rsvp-btn.active.not_going { background: rgba(244,63,94,0.15);  border-color: #f43f5e; color: #f43f5e; }
+.cal-rsvp-btn:disabled { opacity: 0.45; pointer-events: none; }
 `;

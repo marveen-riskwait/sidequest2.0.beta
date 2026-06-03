@@ -5,18 +5,20 @@ import {
 	Card,
 	Form,
 	Button,
+	Alert,
+	Spinner,
 } from "react-bootstrap";
-import { FiMail, FiLock, FiUserPlus } from "react-icons/fi";
+import { FiMail, FiLock, FiUserPlus, FiAtSign } from "react-icons/fi";
 
-// Style coherent avec Friends / Profile / EventModal (dark mode, accents indigo)
+// Style coherent avec Friends / Profile / EventModal (dark mode, accents indigo).
 const AUTH_CSS = `
 .sq-auth-wrap {
-	min-height: calc(100vh);
+	min-height: 100vh;
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	background: radial-gradient(circle at top, #1a1d29 0%, #0b0d13 70%);
-	padding: 4rem 1rem 2rem;
+	padding: 2rem 1rem;
 }
 .sq-auth-card {
 	background: #161922;
@@ -64,42 +66,50 @@ const AUTH_CSS = `
 	font-weight: 600;
 }
 .sq-auth-link:hover { color: #ec4899; }
+.sq-auth-hint {
+	color: #6c757d;
+	font-size: 0.72rem;
+	margin-top: 0.25rem;
+}
 `;
 
 export const Register = () => {
 	const navigate = useNavigate();
 
 	const [email, setEmail] = useState("");
+	const [username, setUsername] = useState("");
 	const [password, setPassword] = useState("");
+	const [loading, setLoading] = useState(false);
+	const [error, setError] = useState("");
 
 	const handleRegister = async (e) => {
 		e.preventDefault();
+		setError("");
+		setLoading(true);
 
 		try {
-			const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/register`, {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({
-					email: email,
-					password: password,
-				}),
-			});
+			const response = await fetch(
+				`${import.meta.env.VITE_BACKEND_URL}/api/register`,
+				{
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ email, username, password }),
+				}
+			);
 
-			const data = await response.json();
+			const data = await response.json().catch(() => ({}));
 
 			if (!response.ok) {
-				alert(data.msg || "Error creating user");
+				setError(data.msg || "Error creating user");
 				return;
 			}
 
-			alert("User registered successfully");
 			navigate("/login");
-
-		} catch (error) {
-			console.error("Register error:", error);
-			alert("Server error");
+		} catch (err) {
+			console.error("Register error:", err);
+			setError("Server error");
+		} finally {
+			setLoading(false);
 		}
 	};
 
@@ -114,9 +124,16 @@ export const Register = () => {
 							<img
 								src="src/front/assets/img/logoSideQuest.png"
 								alt="SideQuest"
-								style={{ filter: "brightness(0) invert(1)", height: "60px", width: "auto" }} />
+								style={{ filter: "brightness(0) invert(1)", height: "60px", width: "auto" }}
+							/>
 						</h2>
 						<p className="text-center text-secondary mb-4">Your SideQuest waits for you!</p>
+
+						{error && (
+							<Alert variant="danger" onClose={() => setError("")} dismissible>
+								{error}
+							</Alert>
+						)}
 
 						<Form onSubmit={handleRegister}>
 							<Form.Group className="mb-3">
@@ -127,8 +144,30 @@ export const Register = () => {
 									type="email"
 									value={email}
 									onChange={(e) => setEmail(e.target.value)}
-									placeholder="Enter email"
+									placeholder="alex@example.com"
+									required
+									autoComplete="email"
 								/>
+							</Form.Group>
+
+							<Form.Group className="mb-3">
+								<Form.Label>
+									<FiAtSign className="me-2" /> Username
+								</Form.Label>
+								<Form.Control
+									type="text"
+									value={username}
+									onChange={(e) => setUsername(e.target.value)}
+									placeholder="alexchen"
+									required
+									minLength={3}
+									maxLength={30}
+									pattern="[A-Za-z0-9._-]{3,30}"
+									autoComplete="username"
+								/>
+								<div className="sq-auth-hint">
+									3-30 caracteres · letras, dígitos, . _ -
+								</div>
 							</Form.Group>
 
 							<Form.Group className="mb-4">
@@ -140,16 +179,26 @@ export const Register = () => {
 									value={password}
 									onChange={(e) => setPassword(e.target.value)}
 									placeholder="Enter password"
+									required
+									minLength={6}
+									autoComplete="new-password"
 								/>
 							</Form.Group>
 
-							<Button type="submit" className="sq-auth-submit w-100 py-2">
-								<FiUserPlus className="me-2" /> Register
+							<Button
+								type="submit"
+								className="sq-auth-submit w-100 py-2"
+								disabled={loading}
+							>
+								{loading
+									? <><Spinner size="sm" animation="border" /> Creating...</>
+									: <><FiUserPlus className="me-2" /> Register</>
+								}
 							</Button>
 						</Form>
 
 						<div className="text-center mt-4 text-secondary small">
-							Ya tienes cuenta ?{" "}
+							Ya tienes cuenta?{" "}
 							<Link to="/login" className="sq-auth-link">
 								Iniciar sesion
 							</Link>
@@ -160,3 +209,5 @@ export const Register = () => {
 		</>
 	);
 };
+
+export default Register;

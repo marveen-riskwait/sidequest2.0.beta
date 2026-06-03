@@ -5,15 +5,16 @@ import {
 	Card,
 	Form,
 	Button,
+	Alert,
+	Spinner,
 } from "react-bootstrap";
 import useGlobalReducer from "../hooks/useGlobalReducer";
-import { api } from "../services/api";
-import { FiMail, FiLock, FiLogIn } from "react-icons/fi";
+import { FiAtSign, FiLock, FiLogIn } from "react-icons/fi";
 
 // Style coherent avec Friends / Profile / EventModal (dark mode, accents indigo)
 const AUTH_CSS = `
 .sq-auth-wrap {
-	min-height: calc(100vh);
+	min-height: 100vh;
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -68,49 +69,72 @@ const AUTH_CSS = `
 .sq-auth-link:hover { color: #ec4899; }
 `;
 
+// Persist the logged-in user safely. Refuses to write anything that isn't
+// a plain object (so we never end up with the literal string "undefined"
+// in localStorage, which crashes initialStore on next boot).
+const safePersistUser = (user) => {
+	if (user && typeof user === "object") {
+		localStorage.setItem("user", JSON.stringify(user));
+		return true;
+	}
+	localStorage.removeItem("user");
+	return false;
+};
+
+const safePersistToken = (token) => {
+	if (typeof token === "string" && token.length > 0) {
+		localStorage.setItem("token", token);
+		return true;
+	}
+	localStorage.removeItem("token");
+	return false;
+};
+
 export const Login = () => {
-    const navigate = useNavigate();
-    const { dispatch } = useGlobalReducer();
+	const navigate = useNavigate();
+	const { dispatch } = useGlobalReducer();
 
-    const [email, setEmail] = useState("");
-    const [password, setPassword] = useState("");
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState("");
+	const [identifier, setIdentifier] = useState("");
+	const [password, setPassword] = useState("");
+	const [loading, setLoading] = useState(false);
+	const [error, setError] = useState("");
 
-    const handleLogin = async (e) => {
-        e.preventDefault();
-        setError("");
-        setLoading(true);
-
+	const handleLogin = async (e) => {
+		e.preventDefault();
+		setError("");
+		setLoading(true);
 
 		try {
 			const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/login`, {
 				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({
-					email,
-					password,
-				}),
+				headers: { "Content-Type": "application/json" },
+				// Backend accepts identifier|email|username — `identifier`
+				// is the cleanest because it covers both cases.
+				body: JSON.stringify({ identifier, password }),
 			});
 
-			const data = await response.json();
+			const data = await response.json().catch(() => ({}));
 
 			if (!response.ok) {
-				alert(data.msg || "Login error");
+				setError(data.msg || "Login error");
 				return;
 			}
 
-			localStorage.setItem("token", data.token);
-			localStorage.setItem("user", JSON.stringify(data.user));
+			// Guard: refuse to persist incomplete responses. Without this an
+			// unexpected payload (e.g. backend hiccup) would write the literal
+			// string "undefined" to localStorage and break the next boot.
+			if (!safePersistToken(data.token) || !safePersistUser(data.user)) {
+				setError("Invalid response from server (missing token or user)");
+				return;
+			}
 
-			alert("Login successful");
+			dispatch({ type: "set_user", payload: data.user });
 			navigate("/");
-
-		} catch (error) {
-			console.error("Login error:", error);
-			alert("Server error");
+		} catch (err) {
+			console.error("Login error:", err);
+			setError("Server error");
+		} finally {
+			setLoading(false);
 		}
 	};
 
@@ -129,16 +153,24 @@ export const Login = () => {
 						</h2>
 						<p className="text-center text-secondary mb-4">Welcome back to your SideQuest!</p>
 
+						{error && (
+							<Alert variant="danger" onClose={() => setError("")} dismissible>
+								{error}
+							</Alert>
+						)}
+
 						<Form onSubmit={handleLogin}>
 							<Form.Group className="mb-3">
 								<Form.Label>
-									<FiMail className="me-2" /> Email
+									<FiAtSign className="me-2" /> Email o username
 								</Form.Label>
 								<Form.Control
-									type="email"
-									value={email}
-									onChange={(e) => setEmail(e.target.value)}
-									placeholder="Enter email"
+									type="text"
+									value={identifier}
+									onChange={(e) => setIdentifier(e.target.value)}
+									placeholder="alex@example.com o alexchen"
+									required
+									autoComplete="username"
 								/>
 							</Form.Group>
 
@@ -151,11 +183,19 @@ export const Login = () => {
 									value={password}
 									onChange={(e) => setPassword(e.target.value)}
 									placeholder="Enter password"
+									required
 								/>
 							</Form.Group>
 
-							<Button type="submit" className="sq-auth-submit w-100 py-2">
-								<FiLogIn className="me-2" /> Login
+							<Button
+								type="submit"
+								className="sq-auth-submit w-100 py-2"
+								disabled={loading}
+							>
+								{loading
+									? <><Spinner size="sm" animation="border" /> Logging in...</>
+									: <><FiLogIn className="me-2" /> Login</>
+								}
 							</Button>
 						</Form>
 
@@ -171,3 +211,5 @@ export const Login = () => {
 		</>
 	);
 };
+
+export default Login;

@@ -22,10 +22,48 @@
   overflow: hidden;
   border: 2px solid #fff;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  position: relative;
 }
 .avatar-marker img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+/* Badge with the count of confirmed ("going") participants — drawn by
+   MarkerAvatar.createMarkerAvatar when goingCount > 0. */
+.avatar-marker-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #22d3ee, #4f46e5);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  border: 2px solid #0b0d12;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  line-height: 1;
+}
+
+/* Tooltip shown on marker hover */
+.sq-marker-tooltip {
+  background: #161922 !important;
+  color: #e9ecef !important;
+  border: 1px solid #262a36 !important;
+  border-radius: 8px !important;
+  padding: 0.35rem 0.65rem !important;
+  font-size: 0.82rem !important;
+  font-weight: 500 !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4) !important;
+}
+.sq-marker-tooltip::before {
+  border-top-color: #161922 !important;
 }
