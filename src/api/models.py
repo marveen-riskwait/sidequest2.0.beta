@@ -1,4 +1,6 @@
-from datetime import datetime
+from enum import Enum
+from datetime import datetime, timezone
+from typing import List, Optional
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import (
     String, Boolean, Float, ForeignKey, Table, Column, Text,
@@ -17,6 +19,7 @@ event_participants = Table(
     Column("event_id", ForeignKey("event.id"), primary_key=True),
     Column("user_id",  ForeignKey("user.id"),  primary_key=True),
 )
+
 
 # ── USER ─────────────────────────────────────────────────
 class User(db.Model):
@@ -52,6 +55,18 @@ class User(db.Model):
             "phone":               self.phone,
             "created_at":          self.created_at.isoformat() + "Z" if self.created_at else None,
         }
+
+    def public_brief(self):
+        """Versión reducida para chat (sin info sensible)."""
+        return {
+            "id":                  self.id,
+            "username":            self.username,
+            "email":               self.email,
+            "first_name":          self.first_name,
+            "last_name":           self.last_name,
+            "profile_picture_url": self.profile_picture_url,
+        }
+
 
 # ── EVENT ─────────────────────────────────────────────────
 class Event(db.Model):
@@ -117,7 +132,6 @@ class Event(db.Model):
             my_inv = next((inv for inv in (self.invitations or []) if inv.user_id == current_user_id), None)
             data["my_invitation_id"] = my_inv.id if my_inv else None
         return data
-
 
 
 # ── FRIENDSHIP ────────────────────────────────────────────

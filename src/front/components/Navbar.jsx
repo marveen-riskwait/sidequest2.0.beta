@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 
 import useGlobalReducer from "../hooks/useGlobalReducer";
+import { api } from "../services/api";
 
 import Container from "react-bootstrap/Container";
 import NavbarBs from "react-bootstrap/Navbar";
@@ -15,7 +16,6 @@ import Dropdown from "react-bootstrap/Dropdown";
 import InputGroup from "react-bootstrap/InputGroup";
 
 import { NotificationBell } from "./NotificationBell.jsx";
-
 import {
     FiMenu,
     FiMail,
@@ -720,6 +720,7 @@ export const Navbar = () => {
                                         </Badge>
                                     )}
                                 </Button>
+                            {/* Verifica esto */}
 
                                 <Dropdown align="end">
                                     <Dropdown.Toggle
@@ -1018,8 +1019,8 @@ export const Navbar = () => {
                             />
                         </>
                     )}
-                </Modal.Body>
 
+                </Modal.Body>
                 <Modal.Footer>
                     <Button variant="outline-light" onClick={closeChatModal}>
                         Cerrar

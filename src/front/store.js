@@ -1,19 +1,16 @@
 export const initialStore = () => {
   return {
     message: null,
-    user: null,
+    user: JSON.parse(localStorage.getItem("user") || "null"),
+    token: localStorage.getItem("token") || null,
     todos: [
       { id: 1, title: "Make the bed", background: null },
       { id: 2, title: "Do my homework", background: null },
     ],
 
-    // ── Chat (navbar) ──────────────────────────────
-    // chatRooms contains both event-rooms and dm-rooms.
-    // chatUnreadTotal is the sum of unread_count across every room.
     chatRooms: [],
     chatUnreadTotal: 0,
 
-    // ── Friends ────────────────────────────────────
     friends: [],
     incomingRequests: [],
     outgoingRequests: [],
@@ -30,7 +27,6 @@ const sumUnread = (rooms) =>
 
 export default function storeReducer(store, action = {}) {
   switch (action.type) {
-    // ── existing ──────────────────────────────────
     case "set_hello":
       return { ...store, message: action.payload };
 
@@ -38,14 +34,16 @@ export default function storeReducer(store, action = {}) {
       const { id, color } = action.payload;
       return {
         ...store,
-        todos: store.todos.map((todo) =>
-          todo.id === id ? { ...todo, background: color } : todo
+        todos: store.todos.map((t) =>
+          t.id === id ? { ...t, background: color } : t
         ),
       };
     }
 
-    // ── auth / navbar ─────────────────────────────
+    // ── auth ──
     case "set_user":
+      if (action.payload) localStorage.setItem("user", JSON.stringify(action.payload));
+      else localStorage.removeItem("user");
       return { ...store, user: action.payload };
 
     case "set_chat_rooms": {
@@ -106,35 +104,13 @@ export default function storeReducer(store, action = {}) {
       return { ...store, outgoingRequests: action.payload };
 
     case "remove_friend":
-      return {
-        ...store,
-        friends: store.friends.filter(
-          (f) => f.friend?.id !== action.payload
-        ),
-      };
-
+      return { ...store, friends: store.friends.filter(f => f.friend?.id !== action.payload) };
     case "remove_incoming_request":
-      return {
-        ...store,
-        incomingRequests: store.incomingRequests.filter(
-          (r) => r.id !== action.payload
-        ),
-      };
-
+      return { ...store, incomingRequests: store.incomingRequests.filter(r => r.id !== action.payload) };
     case "remove_outgoing_request":
-      return {
-        ...store,
-        outgoingRequests: store.outgoingRequests.filter(
-          (r) => r.id !== action.payload
-        ),
-      };
-
+      return { ...store, outgoingRequests: store.outgoingRequests.filter(r => r.id !== action.payload) };
     case "add_outgoing_request":
-      return {
-        ...store,
-        outgoingRequests: [...store.outgoingRequests, action.payload],
-      };
-
+      return { ...store, outgoingRequests: [...store.outgoingRequests, action.payload] };
     case "add_friend":
       return { ...store, friends: [...store.friends, action.payload] };
 

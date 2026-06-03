@@ -6,6 +6,8 @@ import {
 	Form,
 	Button,
 } from "react-bootstrap";
+import useGlobalReducer from "../hooks/useGlobalReducer";
+import { api } from "../services/api";
 import { FiMail, FiLock, FiLogIn } from "react-icons/fi";
 
 // Style coherent avec Friends / Profile / EventModal (dark mode, accents indigo)
@@ -67,13 +69,19 @@ const AUTH_CSS = `
 `;
 
 export const Login = () => {
-	const navigate = useNavigate();
+    const navigate = useNavigate();
+    const { dispatch } = useGlobalReducer();
 
-	const [email, setEmail] = useState("");
-	const [password, setPassword] = useState("");
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState("");
 
-	const handleLogin = async (e) => {
-		e.preventDefault();
+    const handleLogin = async (e) => {
+        e.preventDefault();
+        setError("");
+        setLoading(true);
+
 
 		try {
 			const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/login`, {

@@ -1,314 +1,179 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import {
-  Container,
-  Row,
-  Col,
-  Card,
-  Button,
-  Form,
-  Spinner,
-  Alert,
-  InputGroup
+  Container, Row, Col, Card, Button, Form, Spinner, InputGroup
 } from "react-bootstrap";
-
+import useGlobalReducer from "../hooks/useGlobalReducer.jsx";
+import { useChat } from "../hooks/useChat.jsx";
+import { api } from "../services/api";
 import "./messages.css";
 
 const Messages = () => {
-  // STATES
+  const { conversationId } = useParams();
+  const navigate = useNavigate();
+  const { store } = useGlobalReducer();
+
   const [conversations, setConversations] = useState([]);
-  const [messages, setMessages] = useState([]);
-  const [selectedConversation, setSelectedConversation] = useState(null);
-  const [messageText, setMessageText] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [currentUser, setCurrentUser] = useState(null);
-  const [users, setUsers] = useState([]);
-  const [search, setSearch] = useState("");
+  const [loadingList, setLoadingList] = useState(true);
+  const [text, setText] = useState("");
 
-  const messagesEndRef = useRef(null);
+  const currentUserId = store.user?.id;
+  const selectedId = conversationId ? parseInt(conversationId) : null;
+  const selected = conversations.find((c) => c.id === selectedId);
 
-  // API BASE
-  const API_URL =
-    import.meta.env.VITE_BACKEND_URL;
+  const { messages, loading, sending, sendMessage } = useChat(selectedId);
 
-  // AUTH HEADER
-  const authHeaders = () => ({
-    "Content-Type": "application/json",
-    Authorization:`Bearer ${localStorage.getItem("token")}`
-  });
-
-  // FETCH CURRENT USER
-  const fetchCurrentUser = async () => {
-    try {
-      const res = await fetch(`${API_URL}/api/users/me`,{
-        headers: authHeaders()
-      });
-
-      if (!res.ok) throw new Error("Unauthorized");
-
-      const data = await res.json();
-      setCurrentUser(data);
-    } catch (e) {
-      setError(e.message);
-    }
-  };
-
-  // FETCH USERS
-  const fetchUsers = async () => {
-    try {
-      const res = await fetch(`${API_URL}/api/users`, {
-        headers: authHeaders()
-      });
-
-      if (!res.ok) return;
-
-      const data = await res.json();
-      setUsers(data);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  // CONVERSATIONS
-  const fetchConversations = async () => {
-    try {
-      setLoading(true);
-
-      const res = await fetch(`${API_URL}/api/chat/rooms/${conversationId}`, {
-        headers: authHeaders()
-      });
-
-      if (!res.ok) throw new Error("Failed to load conversations");
-
-      const data = await res.json();
-      setConversations(data);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // MESSAGES
-  const fetchMessages = async (conversationId) => {
-    try {
-      const res = await fetch(
-        `${API_URL}/api/chat/rooms/${conversationId}`,
-        { headers: authHeaders() }
-      );
-
-      if (!res.ok) return;
-
-      const data = await res.json();
-      setMessages(data);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  // SEND MESSAGE
-  const handleSendMessage = async (e) => {
-    e.preventDefault();
-
-    if (!messageText.trim() || !selectedConversation) return;
-
-    try {
-      const res = await fetch(`${API_URL}/api/chat/rooms/${selectedConversation.id}/messages`, {
-        method: "POST",
-        headers: authHeaders(),
-        body: JSON.stringify({
-          conversation_id: selectedConversation.id,
-          content:messageText
-        })
-      });
-
-      if (!res.ok) throw new Error("Send failed");
-
-      setMessageText("");
-      fetchMessages(selectedConversation.id);
-      fetchConversations();
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  // START CONVERSATION
-  const startConversation = async (userId) => {
-    try {
-      const res = await fetch(
-        `${API_URL}/api/chat/private/${id}${userId}`,
-        {
-          method: "POST",
-          headers: authHeaders()
-        }
-      );
-
-      if (!res.ok) throw new Error("Failed");
-
-      const data = await res.json();
-
-      setSelectedConversation(data);
-      fetchConversations();
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  // INIT
+  // Cargar lista de conversaciones + polling cada 5s
   useEffect(() => {
-    const token = localStorage.getItem("token");
-
-    if (!token) {
-      setError("Login required");
-      setLoading(false);
-      return;
-    }
-
-    fetchCurrentUser();
-    fetchUsers();
-    fetchConversations();
+    let alive = true;
+    const load = async () => {
+      try {
+        const data = await api.get("/conversations");
+        if (alive) setConversations(data);
+      } catch (e) { console.error(e); }
+      finally { if (alive) setLoadingList(false); }
+    };
+    load();
+    const id = setInterval(load, 5000);
+    return () => { alive = false; clearInterval(id); };
   }, []);
 
-  // AUTO REFRESH MESSAGES
-  useEffect(() => {
-    if (!selectedConversation) return;
-
-    fetchMessages(selectedConversation.id);
-
-    const interval = setInterval(() => {
-      fetchMessages(selectedConversation.id);
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, [selectedConversation]);
-
-  // AUTO SCROLL
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  if (loading) {
-    return (
-      <Container className="mt-5 text-center">
-        <Spinner animation="border" />
-      </Container>
-    );
-  }
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!text.trim()) return;
+    await sendMessage(text);
+    setText("");
+  };
 
   return (
-    <Container fluid className="vh-100 p-3" style={{ background: "#0b141a" }}>
-      <Row className="h-100 g-3">
-
-        {/* LEFT */}
+    <Container fluid className="messages-page p-3" style={{ paddingTop: "90px" }}>
+      <Row className="g-3" style={{ height: "calc(100vh - 110px)" }}>
+        {/* LISTA */}
         <Col md={4}>
-          <Card className="h-100 border-0" style={{ background: "#111b21" }}>
-            <Card.Header style={{ background: "#202c33", color: "white" }}>
-              Messages
-            </Card.Header>
-
-            <Card.Body className="p-0">
-
-              <div className="p-3">
-                <Form.Control
-                  placeholder="Search"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  style={{ background: "#202c33", border: "none", color: "white" }}
-                />
-              </div>
-
-              {users
-                .filter(u => u.email.includes(search))
-                .map(user => (
-                  <div
-                    key={user.id}
-                    onClick={() => startConversation(user.id)}
-                    style={{
-                      padding: 12,
-                      cursor: "pointer",
-                      borderBottom: "1px solid #1f2c34",
-                      color: "white"
-                    }}
-                  >
-                    {user.email}
-                  </div>
-                ))}
-
-              {conversations.map(conv => (
-                <div
-                  key={conv.id}
-                  onClick={() => setSelectedConversation(conv)}
-                  style={{
-                    padding: 12,
-                    cursor: "pointer",
-                    background: selectedConversation?.id === conv.id ? "#2a3942" : "transparent",
-                    color: "white"
-                  }}
-                >
-                  {conv.other_user.email}
+          <Card className="h-100 chat-list-card">
+            <Card.Header className="chat-header">Tus Conversaciones</Card.Header>
+            <Card.Body className="p-0 overflow-auto">
+              {loadingList ? (
+                <div className="text-center p-4"><Spinner size="sm" /></div>
+              ) : conversations.length === 0 ? (
+                <div className="text-center p-4 text-muted">
+                  No tienes conversaciones todavía.
                 </div>
-              ))}
-
+              ) : (
+                conversations.map((conv) => {
+                  const isActive = conv.id === selectedId;
+                  const other = conv.other_user;
+                  const name = other?.username || other?.email || `User #${conv.other_user_id}`;
+                  const lastMsg = conv.last_message;
+                  return (
+                    <div
+                      key={conv.id}
+                      className={`chat-item ${isActive ? "active" : ""}`}
+                      onClick={() => navigate(`/messages/${conv.id}`)}
+                    >
+                      <div className="chat-avatar">
+                        {other?.profile_picture_url ? (
+                          <img src={other.profile_picture_url} alt={name} />
+                        ) : (
+                          <div className="chat-avatar-placeholder">
+                            {name.charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                      </div>
+                      <div className="chat-info">
+                        <div className="d-flex justify-content-between">
+                          <strong>{name}</strong>
+                          {conv.unread_count > 0 && (
+                            <span className="chat-unread-badge">{conv.unread_count}</span>
+                          )}
+                        </div>
+                        <small className="text-truncate text-muted d-block">
+                          {lastMsg ? lastMsg.content : "Sin mensajes aún"}
+                        </small>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </Card.Body>
           </Card>
         </Col>
 
-        {/* RIGHT */}
+        {/* CHAT */}
         <Col md={8}>
-          {selectedConversation ? (
-            <Card className="h-100 border-0" style={{ background: "#0b141a" }}>
-
-              <Card.Header style={{ background: "#202c33", color: "white" }}>
-                {selectedConversation.other_user.email}
+          {selected ? (
+            <Card className="h-100 d-flex flex-column chat-window">
+              <Card.Header className="chat-header d-flex align-items-center gap-2">
+                {selected.other_user?.profile_picture_url ? (
+                  <img
+                    src={selected.other_user.profile_picture_url}
+                    alt=""
+                    className="chat-header-avatar"
+                  />
+                ) : (
+                  <div className="chat-avatar-placeholder small">
+                    {(selected.other_user?.username || selected.other_user?.email || "?")
+                      .charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <span>
+                  {selected.other_user?.username ||
+                    selected.other_user?.email ||
+                    `User #${selected.other_user_id}`}
+                </span>
               </Card.Header>
 
-              <div className="flex-grow-1 p-3" style={{ overflowY: "auto" }}>
-                {messages.map(msg => (
-                  <div
-                    key={msg.id}
-                    style={{
-                      display: "flex",
-                      justifyContent: msg.sender_id === currentUser?.id ? "flex-end" : "flex-start",
-                      marginBottom: 10
-                    }}
-                  >
-                    <div style={{
-                      background: msg.sender_id === currentUser?.id ? "#005c4b" : "#202c33",
-                      color: "white",
-                      padding: 10,
-                      borderRadius: 10,
-                      maxWidth: "70%"
-                    }}>
-                      {msg.text}
-                    </div>
+              <div className="chat-body flex-grow-1">
+                {loading && messages.length === 0 ? (
+                  <div className="text-center pt-4"><Spinner size="sm" variant="light" /></div>
+                ) : messages.length === 0 ? (
+                  <div className="text-center text-muted pt-4">
+                    Empieza la conversación 👋
                   </div>
-                ))}
-                <div ref={messagesEndRef} />
+                ) : (
+                  messages.map((m) => {
+                    const mine = m.sender_id === currentUserId;
+                    return (
+                      <div key={m.id} className={`chat-bubble-row ${mine ? "mine" : "theirs"}`}>
+                        <div className={`chat-bubble ${m._failed ? "failed" : ""} ${m._optimistic ? "pending" : ""}`}>
+                          <div>{m.content}</div>
+                          <small className="chat-time">
+                            {new Date(m.created_at).toLocaleTimeString([], {
+                              hour: "2-digit", minute: "2-digit",
+                            })}
+                            {m._optimistic && " · enviando…"}
+                            {m._failed && " · ❌ falló"}
+                          </small>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
               </div>
 
-              <Card.Footer style={{ background: "#202c33" }}>
-                <Form onSubmit={handleSendMessage}>
+              <Card.Footer className="chat-footer">
+                <Form onSubmit={handleSubmit}>
                   <InputGroup>
                     <Form.Control
-                      value={messageText}
-                      onChange={(e) => setMessageText(e.target.value)}
-                      style={{ background: "#2a3942", border: "none", color: "white" }}
+                      value={text}
+                      onChange={(e) => setText(e.target.value)}
+                      placeholder="Escribe un mensaje…"
+                      autoFocus
+                      disabled={sending}
                     />
-                    <Button type="submit" style={{ background: "#25d366", border: "none" }}>
-                      Send
+                    <Button type="submit" variant="success" disabled={sending || !text.trim()}>
+                      {sending ? <Spinner size="sm" /> : "Enviar"}
                     </Button>
                   </InputGroup>
                 </Form>
               </Card.Footer>
-
             </Card>
           ) : (
-            <Card className="h-100 d-flex justify-content-center align-items-center">
-              Select a conversation
+            <Card className="h-100 d-flex justify-content-center align-items-center text-muted">
+              Selecciona una conversación para empezar
             </Card>
           )}
         </Col>
-
       </Row>
     </Container>
   );

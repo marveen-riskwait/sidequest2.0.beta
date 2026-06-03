@@ -1,9 +1,7 @@
-// Import necessary components and functions from react-router-dom.
-
 import {
-	createBrowserRouter,
-	createRoutesFromElements,
-	Route,
+    createBrowserRouter,
+    createRoutesFromElements,
+    Route,
 } from "react-router-dom";
 
 import { Layout } from "./pages/Layout";

@@ -51,7 +51,7 @@ const handle = async (res) => {
   return data;
 };
 
-const apiGetEvent       = (id) => fetch(`${API}/api/events/${id}`, { headers: authHeaders() }).then(handle);
+const apiGetEvent       = async (id) => await fetch(`${API}/api/events/${id}`, { headers: authHeaders() }).then(handle);
 const apiCreateEvent    = (body) => fetch(`${API}/api/events`,        { method: "POST",   headers: authHeaders(), body: JSON.stringify(body) }).then(handle);
 const apiUpdateEvent    = (id, body) => fetch(`${API}/api/events/${id}`,  { method: "PUT",  headers: authHeaders(), body: JSON.stringify(body) }).then(handle);
 const apiDeleteEvent    = (id) => fetch(`${API}/api/events/${id}`,  { method: "DELETE", headers: authHeaders() }).then(handle);
