@@ -33,7 +33,7 @@ class User(db.Model):
     last_name:           Mapped[str] = mapped_column(String(50),  nullable=True)
     city:                Mapped[str] = mapped_column(String(100), nullable=True)
     bio:                 Mapped[str] = mapped_column(Text,        nullable=True)
-    profile_picture_url: Mapped[str] = mapped_column(String(500), nullable=True)
+    profile_picture_url: Mapped[str] = mapped_column(Text, nullable=True)
     birthdate:           Mapped[str] = mapped_column(String(20),  nullable=True)
     phone:               Mapped[str] = mapped_column(String(30),  nullable=True)
     created_at:          Mapped[datetime] = mapped_column(DateTime, nullable=True, default=datetime.utcnow)

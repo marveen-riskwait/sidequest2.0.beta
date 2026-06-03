@@ -446,7 +446,7 @@ export const Navbar = () => {
         if (!isLogged) {
             const path = location.pathname;
             if (path !== "/login" && path !== "/register") {
-                navigate("/register", { replace: true });
+                navigate("/login", { replace: true });
             }
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps

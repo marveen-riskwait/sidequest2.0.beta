@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import {
   Button,
@@ -20,6 +20,8 @@ import {
   FiCalendar,
   FiUsers,
   FiActivity,
+  FiImage,
+  FiX,
 } from "react-icons/fi";
 
 import { EventModal } from "./EventModal";
@@ -49,6 +51,17 @@ const apiUpdateMyProfile = (payload) =>
     headers: authHeaders(),
     body: JSON.stringify(payload),
   }).then(handle);
+
+// Convert a File / Blob to base64 dataURL — same approach used for
+// event.image and chat media. The backend stores it directly in
+// profile_picture_url (Text column).
+const fileToBase64 = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 
 // =====================================================
 // INLINE STYLES (dark mode, consistent with Friends page)
@@ -112,6 +125,23 @@ const PROFILE_CSS = `
 .activity-bar .progress { background: #0f111a; height: 14px; border-radius: 10px; }
 .activity-bar .progress-bar { background: linear-gradient(90deg, #6366f1, #ec4899); }
 
+/* Photo picker (replaces the old URL input) */
+.profile-photo-picker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 0;
+}
+.profile-photo-empty {
+  width: 110px; height: 110px;
+  border-radius: 50%;
+  border: 3px dashed #2a2f42;
+  display: flex; align-items: center; justify-content: center;
+  color: #6c757d;
+  background: #0f111a;
+}
+
 /* Hide the bottom navbar while any Bootstrap modal is open so the
    modal footer (Save / Close buttons) is never covered. */
 body.modal-open .bottom-navbar { display: none; }
@@ -147,6 +177,9 @@ export const BottomNavbar = () => {
   const [profileError, setProfileError] = useState(null);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileToast, setProfileToast] = useState(null);
+
+  // Hidden <input type="file"> driven by the visible button below
+  const photoInputRef = useRef(null);
 
   // QUEST STATE (unchanged — local stub)
   const [eventData, setEventData] = useState({
@@ -190,20 +223,45 @@ export const BottomNavbar = () => {
     setProfile((p) => ({ ...p, [e.target.name]: e.target.value }));
   };
 
+  // ----- photo upload (replaces the URL input) -----
+  const handlePickPhoto = () => {
+    if (photoInputRef.current) photoInputRef.current.click();
+  };
+
+  const handlePhotoChange = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-uploading the same file later
+    if (!file) return;
+    if (file.size > 1.5 * 1024 * 1024) {
+      setProfileError("Image too large (max 1.5 MB)");
+      return;
+    }
+    try {
+      const dataUrl = await fileToBase64(file);
+      setProfile((p) => ({ ...p, profile_picture_url: dataUrl }));
+    } catch {
+      setProfileError("Failed to read file");
+    }
+  };
+
+  const removePhoto = () => {
+    setProfile((p) => ({ ...p, profile_picture_url: "" }));
+  };
+
   const saveProfile = async () => {
     if (!profile) return;
     setProfileSaving(true);
     setProfileError(null);
     try {
       const payload = {
-        username:            profile.username || null,
-        first_name:          profile.first_name || null,
-        last_name:           profile.last_name || null,
-        city:                profile.city || null,
-        bio:                 profile.bio || null,
+        username: profile.username || null,
+        first_name: profile.first_name || null,
+        last_name: profile.last_name || null,
+        city: profile.city || null,
+        bio: profile.bio || null,
         profile_picture_url: profile.profile_picture_url || null,
-        birthdate:           profile.birthdate || null,
-        phone:               profile.phone || null,
+        birthdate: profile.birthdate || null,
+        phone: profile.phone || null,
       };
       const data = await apiUpdateMyProfile(payload);
       // keep current stats but refresh user fields
@@ -324,7 +382,7 @@ export const BottomNavbar = () => {
 
           {!profileLoading && profile && (
             <>
-              {/* AVATAR */}
+              {/* AVATAR (read-only display, same as before) */}
               <div className="text-center mb-4">
                 {profile.profile_picture_url ? (
                   <img
@@ -449,14 +507,52 @@ export const BottomNavbar = () => {
                   </Col>
                 </Row>
 
-                <Form.Label>Profile picture URL</Form.Label>
-                <Form.Control
-                  className="mb-3"
-                  name="profile_picture_url"
-                  value={profile.profile_picture_url || ""}
-                  onChange={handleProfileChange}
-                  placeholder="https://i.pravatar.cc/150?img=12"
-                />
+                {/* ---------- PHOTO (file upload, replaces URL input) ---------- */}
+                <Form.Label>Profile picture</Form.Label>
+                <div className="profile-photo-picker mb-3">
+                  {profile.profile_picture_url ? (
+                    <img
+                      src={profile.profile_picture_url}
+                      alt="profile preview"
+                      className="profile-avatar"
+                    />
+                  ) : (
+                    <div className="profile-photo-empty">
+                      <FiUser size={32} />
+                    </div>
+                  )}
+
+                  <div className="d-flex gap-2">
+                    <Button
+                      variant="outline-light"
+                      size="sm"
+                      onClick={handlePickPhoto}
+                    >
+                      <FiImage className="me-1" />
+                      {profile.profile_picture_url ? "Cambiar foto" : "Subir foto"}
+                    </Button>
+                    {profile.profile_picture_url && (
+                      <Button
+                        variant="outline-danger"
+                        size="sm"
+                        onClick={removePhoto}
+                      >
+                        <FiX className="me-1" /> Quitar
+                      </Button>
+                    )}
+                  </div>
+                  <small className="text-secondary">
+                    Desde tu dispositivo · max 1.5 MB
+                  </small>
+
+                  <input
+                    ref={photoInputRef}
+                    type="file"
+                    accept="image/*"
+                    style={{ display: "none" }}
+                    onChange={handlePhotoChange}
+                  />
+                </div>
 
                 <Form.Label>Bio</Form.Label>
                 <Form.Control
