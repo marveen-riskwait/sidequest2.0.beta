@@ -11,7 +11,7 @@ import { FiMail, FiLock, FiUserPlus } from "react-icons/fi";
 // Style coherent avec Friends / Profile / EventModal (dark mode, accents indigo)
 const AUTH_CSS = `
 .sq-auth-wrap {
-	min-height: calc(100vh - 56px);
+	min-height: calc(100vh);
 	display: flex;
 	align-items: center;
 	justify-content: center;
