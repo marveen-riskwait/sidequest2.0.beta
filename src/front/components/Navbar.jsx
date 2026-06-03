@@ -840,7 +840,9 @@ export const Navbar = () => {
 
                                     <Dropdown.Menu className="sq-menu-dropdown">
                                         <Dropdown.Header>
-                                            Hola {cachedUser?.email || "—"}
+                                            Hola {cachedUser?.username
+                                                ? `@${cachedUser.username}`
+                                                : (cachedUser?.email || "—")}
                                         </Dropdown.Header>
                                         <Dropdown.Divider />
 

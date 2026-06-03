@@ -30,3 +30,5 @@ export const compressImage = (file, kind = "chat") =>
     img.onerror = reject;
     img.src = url;
   });
+
+export default compressImage;

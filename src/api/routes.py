@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify
 from flask_cors import CORS
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from werkzeug.security import generate_password_hash, check_password_hash
-from sqlalchemy import text, bindparam
+from sqlalchemy import text, bindparam, or_
 from api.models import (
     db, User, Event, Friendship, ChatRoom, ChatMessage,
     Notification, EventInvitation, InviteSuggestion,
@@ -116,18 +116,35 @@ def register():
         return jsonify({
             "endpoint": "/api/register",
             "method": "POST",
-            "body": {"email": "test@test.com", "password": "123456"}
+            "body": {"email": "test@test.com", "username": "alex", "password": "123456"}
         }), 200
 
     body = request.get_json() or {}
-    email = body.get("email")
+    email = (body.get("email") or "").strip().lower() or None
+    username = (body.get("username") or "").strip() or None
     password = body.get("password")
-    if not email or not password:
-        return jsonify({"msg": "Email and password are required"}), 400
-    if User.query.filter_by(email=email).first():
-        return jsonify({"msg": "User already exists"}), 400
 
-    new_user = User(email=email, password=generate_password_hash(password), is_active=True)
+    if not email or not password or not username:
+        return jsonify({"msg": "Email, username and password are required"}), 400
+
+    # Quick syntactic check on username — alphanumeric + . _ - allowed.
+    import re
+    if not re.fullmatch(r"[A-Za-z0-9._-]{3,30}", username):
+        return jsonify({
+            "msg": "Username must be 3-30 chars (letters, digits, . _ -)"
+        }), 400
+
+    if User.query.filter_by(email=email).first():
+        return jsonify({"msg": "Email already registered"}), 409
+    if User.query.filter_by(username=username).first():
+        return jsonify({"msg": "Username already taken"}), 409
+
+    new_user = User(
+        email=email,
+        username=username,
+        password=generate_password_hash(password),
+        is_active=True,
+    )
     db.session.add(new_user)
     db.session.commit()
     return jsonify({"msg": "User registered successfully", "user": new_user.serialize()}), 201
@@ -139,22 +156,36 @@ def register():
 
 @api.route('/login', methods=['GET', 'POST'])
 def login():
+    """Login with EITHER email or username.
+
+    Accepts any of these field names for the identifier (frontend can use
+    whichever is convenient): `identifier`, `email`, or `username`.
+    """
     if request.method == "GET":
         return jsonify({
             "endpoint": "/api/login",
             "method": "POST",
-            "body": {"email": "test@test.com", "password": "123456"}
+            "body": {"identifier": "test@test.com or username", "password": "123456"}
         }), 200
 
     body = request.get_json() or {}
-    email = body.get("email")
+    identifier = (
+        body.get("identifier")
+        or body.get("email")
+        or body.get("username")
+        or ""
+    ).strip()
     password = body.get("password")
-    if not email or not password:
-        return jsonify({"msg": "Email and password are required"}), 400
+    if not identifier or not password:
+        return jsonify({"msg": "Email/username and password are required"}), 400
 
-    user = User.query.filter_by(email=email).first()
+    # Email lookup is case-insensitive (we lowercase on register too).
+    lowered = identifier.lower()
+    user = User.query.filter(
+        or_(User.email == lowered, User.username == identifier)
+    ).first()
     if not user or not check_password_hash(user.password, password):
-        return jsonify({"msg": "Invalid email or password"}), 401
+        return jsonify({"msg": "Invalid credentials"}), 401
 
     access_token = create_access_token(
         identity=str(user.id),

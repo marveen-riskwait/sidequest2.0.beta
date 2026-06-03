@@ -9,7 +9,7 @@ import {
 	Spinner,
 } from "react-bootstrap";
 import useGlobalReducer from "../hooks/useGlobalReducer";
-import { FiMail, FiLock, FiLogIn } from "react-icons/fi";
+import { FiAtSign, FiLock, FiLogIn } from "react-icons/fi";
 
 // Style coherent avec Friends / Profile / EventModal (dark mode, accents indigo)
 const AUTH_CSS = `
@@ -94,7 +94,7 @@ export const Login = () => {
 	const navigate = useNavigate();
 	const { dispatch } = useGlobalReducer();
 
-	const [email, setEmail] = useState("");
+	const [identifier, setIdentifier] = useState("");
 	const [password, setPassword] = useState("");
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState("");
@@ -108,7 +108,9 @@ export const Login = () => {
 			const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/login`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ email, password }),
+				// Backend accepts identifier|email|username — `identifier`
+				// is the cleanest because it covers both cases.
+				body: JSON.stringify({ identifier, password }),
 			});
 
 			const data = await response.json().catch(() => ({}));
@@ -160,14 +162,15 @@ export const Login = () => {
 						<Form onSubmit={handleLogin}>
 							<Form.Group className="mb-3">
 								<Form.Label>
-									<FiMail className="me-2" /> Email
+									<FiAtSign className="me-2" /> Email o username
 								</Form.Label>
 								<Form.Control
-									type="email"
-									value={email}
-									onChange={(e) => setEmail(e.target.value)}
-									placeholder="Enter email"
+									type="text"
+									value={identifier}
+									onChange={(e) => setIdentifier(e.target.value)}
+									placeholder="alex@example.com o alexchen"
 									required
+									autoComplete="username"
 								/>
 							</Form.Group>
 
