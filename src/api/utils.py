@@ -1,6 +1,4 @@
 from flask import jsonify, url_for
-from .models import db, Conversation, Notification, NotificationType
-
 
 class APIException(Exception):
     status_code = 400
@@ -17,12 +15,10 @@ class APIException(Exception):
         rv['message'] = self.message
         return rv
 
-
 def has_no_empty_params(rule):
     defaults = rule.defaults if rule.defaults is not None else ()
     arguments = rule.arguments if rule.arguments is not None else ()
     return len(defaults) >= len(arguments)
-
 
 def generate_sitemap(app):
     links = ['/admin/']
@@ -42,39 +38,4 @@ def generate_sitemap(app):
         <p>API HOST: <script>document.write('<input style="padding: 5px; width: 300px" type="text" value="'+window.location.href+'" />');</script></p>
         <p>Start working on your project by following the <a href="https://start.4geeksacademy.com/starters/full-stack" target="_blank">Quick Start</a></p>
         <p>Remember to specify a real endpoint path like: </p>
-        <ul style="text-align: left;">""" + links_html + "</ul></div>"
-
-
-# ============================================================
-#  Helpers para Chat y Notificaciones
-# ============================================================
-
-def get_or_create_conversation(event_id: int, user_a_id: int, user_b_id: int) -> Conversation:
-    """
-    Devuelve la conversación entre dos usuarios para un evento.
-    Si no existe, la crea. Normaliza el orden de los IDs para que
-    la UniqueConstraint funcione (user1_id siempre menor que user2_id).
-    """
-    if user_a_id == user_b_id:
-        raise ValueError("No puedes iniciar una conversación contigo mismo.")
-    u1, u2 = sorted([user_a_id, user_b_id])
-
-    conv = Conversation.query.filter_by(event_id=event_id, user1_id=u1, user2_id=u2).first()
-    if conv:
-        return conv
-
-    conv = Conversation(event_id=event_id, user1_id=u1, user2_id=u2)
-    db.session.add(conv)
-    db.session.flush()  # para tener conv.id sin hacer commit todavía
-    return conv
-
-
-def notify(user_id: int, ntype: NotificationType, message: str, related_id: int | None = None) -> Notification:
-    """
-    Crea una notificación para un usuario.
-    NO hace commit — el caller decide cuándo persistir
-    (esto permite agrupar notificación + acción en una sola transacción).
-    """
-    n = Notification(user_id=user_id, type=ntype, message=message, related_id=related_id)
-    db.session.add(n)
-    return n
+        <ul style="text-align: left;">"""+links_html+"</ul></div>"

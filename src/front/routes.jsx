@@ -12,20 +12,42 @@ import { Register } from "./pages/Register";
 import { Login } from "./pages/Login";
 import { Friends } from "./pages/Friends";
 import { FriendProfile } from "./pages/FriendProfile";
-import Messages from "./pages/Messages";
+import { EventsList } from "./pages/EventsList";
+import Map from "./pages/Map";
 
 export const router = createBrowserRouter(
-    createRoutesFromElements(
-        <Route path="/" element={<Layout />} errorElement={<h1>Not found!</h1>}>
-            <Route path="/" element={<Home />} />
-            <Route path="/demo" element={<Demo />} />
-            <Route path="/single/:theId" element={<Single />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/friends" element={<Friends />} />
-            <Route path="/friends/:userId" element={<FriendProfile />} />
-            <Route path="/messages" element={<Messages />} />
-            <Route path="/messages/:conversationId" element={<Messages />} />
-        </Route>
-    )
+	createRoutesFromElements(
+
+		// Root Route
+		<Route
+			path="/"
+			element={<Layout />}
+			errorElement={<h1>Not found!</h1>}
+		>
+
+			{/* Home */}
+			<Route path="/" element={<Home />} />
+
+			{/* Demo */}
+			<Route path="/demo" element={<Demo />} />
+
+			{/* Single */}
+			<Route path="/single/:theId" element={<Single />} />
+
+			{/* Register */}
+			<Route path="/register" element={<Register />} />
+
+			<Route path="/login" element={<Login />} />
+
+			{/* Friends */}
+			<Route path="/friends" element={<Friends />} />
+
+			<Route path="/friends/:userId" element={<FriendProfile />} />
+
+			{/* Events */}
+			<Route path="/events" element={<EventsList />} />
+
+			<Route path="/map" element={<Map />} />
+		</Route>
+	)
 );
