@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Container,
   Row,
@@ -224,6 +225,7 @@ const ResponseBar = ({ eventId, myStatus, initialRsvp, onChanged }) => {
 // MAIN
 // =============================================================
 export const EventsList = () => {
+  const navigate = useNavigate();
   const [events, setEvents]   = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState(null);
@@ -433,6 +435,20 @@ export const EventsList = () => {
                         </span>
                       )}
                     </div>
+
+                    {e.latitude != null && e.longitude != null && (
+                      <Button
+                        variant="outline-info"
+                        size="sm"
+                        className="mt-2"
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          navigate(`/map?event=${e.id}`);
+                        }}
+                      >
+                        <FiMapPin className="me-1" /> View on map
+                      </Button>
+                    )}
 
                     {showResponseBar(e) && (
                       <ResponseBar

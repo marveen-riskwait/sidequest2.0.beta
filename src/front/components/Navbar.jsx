@@ -421,7 +421,7 @@ const getPreviewText = (last) => {
     if (!last) return null;
     if (last.deleted) return "Mensaje eliminado";
     if (last.text) return last.text;
-    if (last.media_type === "image") return "📷 Foto";
+    if (last.media_type === "image") return "📷 Photo";
     if (last.media_type === "audio") return "🎤 Audio";
     return null;
 };
@@ -615,8 +615,16 @@ export const Navbar = () => {
         const file = e.target.files?.[0];
         e.target.value = "";
         if (!file || !activeRoom) return;
+        // Compress before sending — keeps a phone photo around ~250 KB.
+        let dataUrl;
         try {
-            const dataUrl = await fileToDataURL(file);
+            const { compressImage } = await import("../utils/uploadImage");
+            dataUrl = await compressImage(file, "chat");
+        } catch (compressErr) {
+            console.error("Compression failed, sending raw:", compressErr);
+            dataUrl = await fileToDataURL(file);
+        }
+        try {
             await sendRoomMessage(activeRoom.id, {
                 media_url: dataUrl,
                 media_type: "image",

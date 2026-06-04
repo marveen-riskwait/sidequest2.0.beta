@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
 import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet";
+import { useSearchParams } from "react-router-dom";
 import { Container, Spinner, Alert } from "react-bootstrap";
 import { FiCrosshair } from "react-icons/fi";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 import useGlobalReducer from "../hooks/useGlobalReducer";
-import { createMarkerAvatar } from "./MarkerAvatar";
+import { createMarkerAvatar, pickMarkerImage, pickMarkerLetter } from "./MarkerAvatar";
 import MapClickHandler from "./MapClickHandler";
 import { EventModal } from "./EventModal";
 import "./mapview.css";
@@ -15,7 +15,6 @@ import "./mapview.css";
 const MADRID = [40.4168, -3.7038];
 const computeCenter = (userCenter) => userCenter || MADRID;
 
-// ── Tooltip helpers ────────────────────────────────────────
 const startOfDay = (d) => {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
@@ -33,20 +32,20 @@ const daysUntilEvent = (event) => {
 
 const formatDaysUntil = (n) => {
   if (n === null) return "";
-  if (n === 0) return "hoy";
-  if (n === 1) return "mañana";
-  if (n < 0) return `hace ${-n} día${n === -1 ? "" : "s"}`;
-  return `en ${n} día${n === 1 ? "" : "s"}`;
+  if (n === 0) return "today";
+  if (n === 1) return "tomorrow";
+  if (n < 0) return `${-n} day${n === -1 ? "" : "s"} ago`;
+  return `in ${n} day${n === 1 ? "" : "s"}`;
 };
 
 const formatTooltip = (event) => {
-  const title = event.title || "Evento";
-  const when  = formatDaysUntil(daysUntilEvent(event));
-  const time  = event.time || "";
+  const title = event.title || "Event";
+  const when = formatDaysUntil(daysUntilEvent(event));
+  const time = event.time || "";
   return [title, when, time].filter(Boolean).join(" · ");
 };
 
-// ── User location dot (Google Maps style) ─────────────────
+// Blue "you are here" dot with a soft pulsing ring.
 const createUserDotIcon = () =>
   L.divIcon({
     html:
@@ -68,32 +67,21 @@ const createUserDotIcon = () =>
     iconAnchor: [11, 11],
   });
 
-// ── Detector de interacción manual ─────────────────────────
-// Vit à l'intérieur du MapContainer (react-leaflet impose ça pour
-// useMapEvents). Détecte les drags utilisateur ET les zooms manuels,
-// en filtrant les mouvements programmatiques via le ref `isProgRef`.
+// Manual-interaction detector. Lives inside MapContainer (react-leaflet
+// requires that for useMapEvents). Detects user drags and manual zooms,
+// filtering out programmatic moves via the isProgRef flag.
 const UserInteractionWatcher = ({ isProgRef, onUserInteract }) => {
   useMapEvents({
     dragstart: () => {
-      // dragstart ne se déclenche QUE pour les drags utilisateur —
-      // les flyTo / panTo programmatiques ne le firent pas.
       onUserInteract();
     },
     zoomstart: () => {
-      // zoomstart fire aussi pour les flyTo programmatiques → filtre.
       if (!isProgRef.current) onUserInteract();
     },
   });
   return null;
 };
 
-/**
- * Mapview con modo "follow" estilo Google Maps:
- *   - Por defecto la carte suit l'utilisateur (panTo cada GPS update).
- *   - Si el user arrastra o zoomea manualmente → follow OFF.
- *   - Click en el botón 🎯 → follow ON otra vez + flyTo a la posición.
- *   - Botón visual: rellena d'azul cuando follow ON, blanco cuando OFF.
- */
 export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
   const { store } = useGlobalReducer();
   const mapFilterDays = store?.mapFilterDays ?? null;
@@ -107,29 +95,18 @@ export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
   const [activeEventId, setActiveEventId] = useState(null);
   const [prefillCoords, setPrefillCoords] = useState(null);
 
-  // Map instance + follow-mode state ──
   const mapRef = useRef(null);
+
   const [followUser, setFollowUserState] = useState(true);
-  // Mirror le state dans un ref pour accéder à la dernière valeur
-  // dans des handlers async sans souffrir des stale closures.
   const followUserRef = useRef(true);
   const setFollowUser = (v) => {
     followUserRef.current = v;
     setFollowUserState(v);
   };
 
-  // Flag pour distinguer les mouvements programmatiques (notre flyTo)
-  // des zooms utilisateur, afin de ne PAS désactiver le follow quand
-  // c'est nous qui faisons bouger la carte.
   const isProgrammaticMoveRef = useRef(false);
-
   const hasAutoCenteredRef = useRef(false);
 
-  // ── Focus on a specific event (deep-link from other pages) ──
-  // When the URL has ?event=<id> we fly to that event's coords and
-  // force-show its marker on the map even if the user has a pending
-  // invitation (which normally hides it). The id is captured into a ref
-  // because the URL param can disappear before the events arrive.
   const [searchParams, setSearchParams] = useSearchParams();
   const pendingFocusIdRef = useRef(null);
   const [forceShowEventId, setForceShowEventId] = useState(null);
@@ -138,17 +115,16 @@ export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
     const raw = searchParams.get("event");
     if (!raw) return;
     const id = parseInt(raw, 10);
-    if (Number.isFinite(id)) pendingFocusIdRef.current = id;
+    if (!Number.isNaN(id)) pendingFocusIdRef.current = id;
   }, [searchParams]);
 
   const currentUser = JSON.parse(localStorage.getItem("user") || "null");
 
-  // ── fetch events with retry ──────────────────────────
   const fetchEvents = async () => {
     const apiUrl = import.meta.env.VITE_BACKEND_URL;
     const token  = localStorage.getItem("token");
     if (!apiUrl) {
-      setError("Falta VITE_BACKEND_URL en el .env del frontend");
+      setError("VITE_BACKEND_URL is missing from the frontend .env");
       setLoading(false);
       return;
     }
@@ -180,7 +156,7 @@ export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
     }
   };
 
-  // ── geolocation: watchPosition + auto-center first fix ──
+  // geolocation: watchPosition + one-time auto-center on first fix
   useEffect(() => {
     fetchEvents();
 
@@ -191,7 +167,6 @@ export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
         const next = [pos.coords.latitude, pos.coords.longitude];
         setUserCenter(next);
 
-        // Premier fix → flyTo automatique une seule fois
         if (!hasAutoCenteredRef.current && mapRef.current) {
           isProgrammaticMoveRef.current = true;
           mapRef.current.flyTo(next, 14, { duration: 0.8 });
@@ -199,7 +174,7 @@ export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
           setTimeout(() => { isProgrammaticMoveRef.current = false; }, 900);
         }
       },
-      () => { /* permission denied / unavailable → fallback Madrid */ },
+      () => { /* permission denied / unavailable -> fallback Madrid */ },
       {
         enableHighAccuracy: true,
         maximumAge: 5000,
@@ -208,19 +183,16 @@ export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
     );
 
     return () => navigator.geolocation.clearWatch(watchId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── deep-link focus: when ?event=<id> is set, fly to that event ──
-  // Runs whenever events arrive. If we have a pending focus id and the
-  // map is mounted, we centre on that event, force-show its marker, and
-  // clear the URL param so a reload doesn't refire the focus.
+  // deep-link focus: when ?event=<id> is set, fly to that event
   useEffect(() => {
     const targetId = pendingFocusIdRef.current;
     if (!targetId || events.length === 0 || !mapRef.current) return;
 
     const target = events.find((e) => e.id === targetId);
     if (!target || target.latitude == null || target.longitude == null) {
-      // Event not found or not geolocated → clear and bail.
       pendingFocusIdRef.current = null;
       if (searchParams.get("event")) {
         searchParams.delete("event");
@@ -229,20 +201,13 @@ export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
       return;
     }
 
-    // Stop follow mode and fly to the event.
     setFollowUser(false);
     isProgrammaticMoveRef.current = true;
-    mapRef.current.flyTo(
-      [target.latitude, target.longitude],
-      15,
-      { duration: 1 }
-    );
+    mapRef.current.flyTo([target.latitude, target.longitude], 15, { duration: 1 });
     setTimeout(() => { isProgrammaticMoveRef.current = false; }, 1100);
 
-    // Force-show the marker even if the event is in pending state.
     setForceShowEventId(targetId);
 
-    // Clear the param so future reloads centre on the user instead.
     pendingFocusIdRef.current = null;
     if (searchParams.get("event")) {
       searchParams.delete("event");
@@ -251,22 +216,17 @@ export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events]);
 
-  // ── follow effect: pan vers l'utilisateur à chaque update GPS ──
-  // Uniquement si follow est ON. Utilise panTo (pas flyTo) parce qu'on
-  // veut un déplacement fluide sans changement de zoom — et panTo ne
-  // déclenche pas zoomstart, donc UserInteractionWatcher ne voit rien.
+  // follow effect: pan to the user on each GPS update (follow ON only)
   useEffect(() => {
     if (!followUser || !userCenter || !mapRef.current) return;
-    if (!hasAutoCenteredRef.current) return; // pas encore d'auto-center
+    if (!hasAutoCenteredRef.current) return;
     mapRef.current.panTo(userCenter, { animate: true, duration: 0.5 });
   }, [userCenter, followUser]);
 
   const mapCenter = useMemo(() => computeCenter(userCenter), [userCenter]);
 
-  // ── filter events ────────────────────────────────────
   const visibleEvents = useMemo(() => {
     return events.filter((e) => {
-      // Force-shown event always passes through (deep-link from a list).
       if (e.id === forceShowEventId) return true;
       if (e.my_status === "pending") return false;
       const days = daysUntilEvent(e);
@@ -277,7 +237,18 @@ export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
     });
   }, [events, mapFilterDays, forceShowEventId]);
 
-  // ── handlers ────────────────────────────────────────
+  const handleUserInteract = () => {
+    if (followUserRef.current) setFollowUser(false);
+  };
+
+  const recenterOnUser = () => {
+    if (!mapRef.current || !userCenter) return;
+    isProgrammaticMoveRef.current = true;
+    setFollowUser(true);
+    mapRef.current.flyTo(userCenter, 15, { duration: 0.8 });
+    setTimeout(() => { isProgrammaticMoveRef.current = false; }, 900);
+  };
+
   const handleMapClick = (coords) => {
     setActiveEventId(null);
     setPrefillCoords(coords);
@@ -303,79 +274,8 @@ export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
     onSaved && onSaved(eventOrNull);
   };
 
-  // L'utilisateur a fait drag ou zoom manuel → on coupe le follow.
-  const handleUserInteract = () => {
-    if (followUserRef.current) setFollowUser(false);
-  };
-
-  // Click sur le bouton 🎯 → réactive le follow + flyTo immédiat.
-  const recenterOnUser = () => {
-    if (!mapRef.current || !userCenter) return;
-    isProgrammaticMoveRef.current = true;
-    setFollowUser(true);
-    mapRef.current.flyTo(userCenter, 15, { duration: 0.8 });
-    setTimeout(() => { isProgrammaticMoveRef.current = false; }, 900);
-  };
-
-  // ── render ──────────────────────────────────────────
   return (
     <Container fluid className="map-page p-0">
-      <style>{`
-        .sq-marker-icon { background: transparent !important; border: 0 !important; }
-        .sq-marker-wrapper:hover .sq-marker-tip-floater {
-          opacity: 1 !important;
-          transform: translateX(-50%) translateY(-3px) !important;
-        }
-        @media (hover: none) {
-          .sq-marker-wrapper:hover .sq-marker-tip-floater { opacity: 0 !important; }
-        }
-        .sq-user-dot-icon { background: transparent !important; border: 0 !important; }
-        @keyframes sq-user-pulse {
-          0%   { transform: scale(0.8); opacity: 0.8; }
-          70%  { transform: scale(1.6); opacity: 0;   }
-          100% { transform: scale(1.6); opacity: 0;   }
-        }
-        .sq-recenter-btn {
-          position: absolute;
-          bottom: 20px;
-          right: 16px;
-          z-index: 500;
-          width: 44px;
-          height: 44px;
-          border-radius: 50%;
-          border: 1px solid #d0d4dc;
-          box-shadow: 0 2px 10px rgba(0,0,0,0.25);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-          transition: transform 0.12s ease, box-shadow 0.12s ease,
-                      background 0.18s ease, color 0.18s ease,
-                      border-color 0.18s ease;
-        }
-        /* Follow OFF → white background, blue icon (call to action) */
-        .sq-recenter-btn.is-off {
-          background: #fff;
-          color: #4285f4;
-        }
-        /* Follow ON → solid blue, white icon (active state) */
-        .sq-recenter-btn.is-on {
-          background: #4285f4;
-          color: #fff;
-          border-color: #4285f4;
-        }
-        .sq-recenter-btn:hover {
-          transform: scale(1.06);
-          box-shadow: 0 4px 14px rgba(0,0,0,0.35);
-        }
-        .sq-recenter-btn:active { transform: scale(0.95); }
-        .sq-recenter-btn:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
-          transform: none !important;
-        }
-      `}</style>
-
       {loading && (
         <div className="text-center py-3">
           <Spinner animation="border" size="sm" />
@@ -388,7 +288,7 @@ export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
 
       <div
         className="sq-map-wrapper"
-        style={{ height: "calc(100vh - 56px - 64px)", width: "100%", position: "relative" }}
+        style={{ height: "calc(100vh - 56px - 64px)", width: "100%" }}
       >
         <MapContainer
           center={mapCenter}
@@ -404,13 +304,11 @@ export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
 
           <MapClickHandler onMapClick={handleMapClick} />
 
-          {/* Détecteur d'interaction utilisateur — coupe le follow */}
           <UserInteractionWatcher
             isProgRef={isProgrammaticMoveRef}
             onUserInteract={handleUserInteract}
           />
 
-          {/* User location dot */}
           {userCenter && (
             <Marker
               position={userCenter}
@@ -420,23 +318,22 @@ export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
             />
           )}
 
-          {/* Event markers */}
           {visibleEvents.map((event) => (
             <Marker
               key={event.id}
               position={event.position}
               icon={createMarkerAvatar(
-                event,
+                pickMarkerImage(event),
                 56,
                 event.going_count || 0,
                 formatTooltip(event),
+                pickMarkerLetter(event)
               )}
               eventHandlers={{ click: () => handleMarkerClick(event) }}
             />
           ))}
         </MapContainer>
 
-        {/* Bouton recentrer + indicateur visuel du mode follow */}
         <button
           type="button"
           className={`sq-recenter-btn ${followUser ? "is-on" : "is-off"}`}
@@ -444,10 +341,10 @@ export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
           disabled={!userCenter}
           title={
             !userCenter
-              ? "Esperando GPS..."
+              ? "Waiting for GPS..."
               : followUser
-              ? "Siguiéndote · Click para recentrar"
-              : "Volver a seguirme"
+              ? "Following you · Click to recenter"
+              : "Follow me again"
           }
         >
           <FiCrosshair size={20} />

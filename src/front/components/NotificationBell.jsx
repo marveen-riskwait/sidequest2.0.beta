@@ -49,12 +49,7 @@ const BELL_CSS = `
 .sq-bell-menu {
   background: #161922; border: 1px solid #262a36;
   color: #e9ecef;
-  width: 360px;
-  /* Never extend beyond the viewport — caps at screen width minus a
-     small gutter so the dropdown never gets clipped on the right edge
-     on phones narrower than 360px. */
-  max-width: calc(100vw - 16px);
-  max-height: 480px;
+  width: 360px; max-height: 480px;
   overflow-y: auto;
   padding: 0;
 }
@@ -141,28 +136,6 @@ const BELL_CSS = `
   margin-left: auto;
 }
 .sq-bell-close:hover { color: #ff8a8a !important; }
-
-/* ── XS / small phones (< 576px) ─────────────────────────── */
-@media (max-width: 575.98px) {
-  .sq-bell-menu { max-height: 70vh; }
-  .sq-bell-item {
-    padding: 0.55rem 0.7rem;
-    gap: 0.5rem;
-  }
-  .sq-bell-msg { font-size: 0.82rem; }
-  .sq-bell-time { font-size: 0.62rem; }
-  .sq-bell-actions { gap: 0.25rem; margin-top: 0.4rem; }
-  .sq-bell-btn {
-    font-size: 0.66rem !important;
-    padding: 0.14rem 0.45rem !important;
-  }
-  .sq-bell-avatar { width: 34px; height: 34px; border-radius: 8px; }
-  .sq-bell-header {
-    padding: 0.55rem 0.75rem;
-  }
-  .sq-bell-title { font-size: 0.88rem; }
-  .sq-bell-mark-all { font-size: 0.65rem !important; padding: 0.15rem 0.45rem !important; }
-}
 `;
 
 // =====================================================
@@ -170,35 +143,46 @@ const BELL_CSS = `
 // =====================================================
 const renderMessage = (n) => {
     const p = n.payload || {};
-    const from = p.from_email || "Alguien";
+    const from = p.from_email || "Someone";
 
     if (n.type === "friend_request") {
-        return (<><strong>{from}</strong> te envió una solicitud de amistad</>);
+        return (<><strong>{from}</strong> sent you a friend request</>);
     }
 
     if (n.type === "event_invite") {
-        const title = p.event_title || "un evento";
+        const title = p.event_title || "an event";
         const when = [p.event_date, p.event_time].filter(Boolean).join(" ");
         return (
             <>
-                <strong>{from}</strong> te invitó a "<strong>{title}</strong>"
-                {when ? ` el ${when}` : ""}
+                <strong>{from}</strong> invited you to "<strong>{title}</strong>"
+                {when ? ` on ${when}` : ""}
+            </>
+        );
+    }
+
+    if (n.type === "event_public") {
+        const title = p.event_title || "a public event";
+        const when = [p.event_date, p.event_time].filter(Boolean).join(" ");
+        return (
+            <>
+                <strong>{from}</strong> created a public event "<strong>{title}</strong>"
+                {when ? ` on ${when}` : ""}
             </>
         );
     }
 
     if (n.type === "invite_suggestion") {
-        const title = p.event_title || "tu evento";
-        const target = p.suggested_user_email || "alguien";
+        const title = p.event_title || "your event";
+        const target = p.suggested_user_email || "someone";
         return (
             <>
-                <strong>{from}</strong> propone invitar a <strong>{target}</strong>{" "}
-                a "<strong>{title}</strong>"
+                <strong>{from}</strong> suggests inviting <strong>{target}</strong>{" "}
+                to "<strong>{title}</strong>"
             </>
         );
     }
 
-    return "Tienes una notificación nueva";
+    return "You have a new notification";
 };
 
 const formatTimeAgo = (iso) => {
@@ -206,7 +190,7 @@ const formatTimeAgo = (iso) => {
     const t = new Date(iso).getTime();
     if (Number.isNaN(t)) return "";
     const diff = Math.max(0, (Date.now() - t) / 1000);
-    if (diff < 60) return "ahora";
+    if (diff < 60) return "now";
     if (diff < 3600) return `${Math.floor(diff / 60)} min`;
     if (diff < 86400) return `${Math.floor(diff / 3600)} h`;
     return `${Math.floor(diff / 86400)} d`;
@@ -285,7 +269,7 @@ export const NotificationBell = () => {
 
     const handleClickNotif = (n) => {
         if (!n.is_read) markAsRead(n.id);
-        if (n.type === "event_invite" || n.type === "invite_suggestion") navigate("/events");
+        if (n.type === "event_invite" || n.type === "event_public" || n.type === "invite_suggestion") navigate("/events");
         else if (n.type === "friend_request") navigate("/friends");
     };
 
@@ -309,7 +293,7 @@ export const NotificationBell = () => {
                 <Dropdown.Toggle
                     as={Button}
                     className="sq-bell-toggle border-0"
-                    title="Notificaciones"
+                    title="Notifications"
                 >
                     <FiBell size={22} />
                     {unreadCount > 0 && (
@@ -325,24 +309,24 @@ export const NotificationBell = () => {
 
                 <Dropdown.Menu className="sq-bell-menu">
                     <div className="sq-bell-header">
-                        <div className="sq-bell-title">Tus Notificaciones</div>
+                        <div className="sq-bell-title">Your notifications</div>
                         {unreadCount > 0 && (
                             <Button
                                 size="sm"
                                 className="sq-bell-mark-all"
                                 onClick={(e) => { e.stopPropagation(); markAllRead(); }}
                             >
-                                Marcar todas
+                                Mark all
                             </Button>
                         )}
                     </div>
 
                     {(notifications || []).length === 0 ? (
-                        <div className="sq-bell-empty">No tienes notificaciones</div>
+                        <div className="sq-bell-empty">You have no notifications</div>
                     ) : (
-                        notifications.map((n) => {
+                        (notifications || []).slice(0, 5).map((n) => {
                             const isFriend     = n.type === "friend_request";
-                            const isEvent      = n.type === "event_invite";
+                            const isEvent      = n.type === "event_invite" || n.type === "event_public";
                             const isSuggestion = n.type === "invite_suggestion";
 
                             return (
@@ -366,11 +350,11 @@ export const NotificationBell = () => {
                                                 <>
                                                     <Button size="sm" className="sq-bell-btn accept"
                                                         onClick={(e) => { e.stopPropagation(); acceptFriend(n); }}>
-                                                        <FiCheck /> Aceptar
+                                                        <FiCheck /> Accept
                                                     </Button>
                                                     <Button size="sm" className="sq-bell-btn refuse"
                                                         onClick={(e) => { e.stopPropagation(); refuseFriend(n); }}>
-                                                        <FiX /> Rechazar
+                                                        <FiX /> Refuse
                                                     </Button>
                                                 </>
                                             )}
@@ -379,18 +363,18 @@ export const NotificationBell = () => {
                                                 <>
                                                     <Button size="sm" className="sq-bell-btn going"
                                                         onClick={(e) => { e.stopPropagation(); respondEvent(n, "going"); }}
-                                                        title="Voy">
-                                                        <FiCheckCircle /> Voy
+                                                        title="Going">
+                                                        <FiCheckCircle /> Going
                                                     </Button>
                                                     <Button size="sm" className="sq-bell-btn maybe"
                                                         onClick={(e) => { e.stopPropagation(); respondEvent(n, "maybe"); }}
-                                                        title="Tal vez">
-                                                        <FiHelpCircle /> Tal vez
+                                                        title="Maybe">
+                                                        <FiHelpCircle /> Maybe
                                                     </Button>
                                                     <Button size="sm" className="sq-bell-btn refuse"
                                                         onClick={(e) => { e.stopPropagation(); respondEvent(n, "not_going"); }}
-                                                        title="No voy">
-                                                        <FiX /> No voy
+                                                        title="Not going">
+                                                        <FiX /> Not going
                                                     </Button>
                                                 </>
                                             )}
@@ -399,23 +383,23 @@ export const NotificationBell = () => {
                                                 <>
                                                     <Button size="sm" className="sq-bell-btn accept"
                                                         onClick={(e) => { e.stopPropagation(); approveSuggestion(n); }}>
-                                                        <FiCheck /> Aprobar
+                                                        <FiCheck /> Approve
                                                     </Button>
                                                     <Button size="sm" className="sq-bell-btn refuse"
                                                         onClick={(e) => { e.stopPropagation(); refuseSuggestion(n); }}>
-                                                        <FiX /> Rechazar
+                                                        <FiX /> Refuse
                                                     </Button>
                                                 </>
                                             )}
 
                                             {!n.is_read && (
                                                 <Button size="sm" className="sq-bell-btn plain"
-                                                    title="Marcar como leída"
+                                                    title="Mark as read"
                                                     onClick={(e) => { e.stopPropagation(); markAsRead(n.id); }}>
                                                     <FiCheckCircle />
                                                 </Button>
                                             )}
-                                            <Button size="sm" className="sq-bell-close" title="Eliminar"
+                                            <Button size="sm" className="sq-bell-close" title="Delete"
                                                 onClick={(e) => { e.stopPropagation(); deleteNotification(n.id); }}>
                                                 <FiX />
                                             </Button>

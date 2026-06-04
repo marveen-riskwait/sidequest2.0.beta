@@ -242,15 +242,20 @@ export const BottomNavbar = () => {
     const file = e.target.files?.[0];
     e.target.value = ""; // allow re-uploading the same file later
     if (!file) return;
-    if (file.size > 1.5 * 1024 * 1024) {
-      setProfileError("Image too large (max 1.5 MB)");
-      return;
-    }
+    // No hard size cap — compressImage reduces even a 25 MB iPhone shot to
+    // ~250 KB. The browser's FileReader handles the original easily.
     try {
-      const dataUrl = await fileToBase64(file);
+      const { compressImage } = await import("../utils/uploadImage");
+      const dataUrl = await compressImage(file, "profile");
       setProfile((p) => ({ ...p, profile_picture_url: dataUrl }));
-    } catch {
-      setProfileError("Failed to read file");
+    } catch (err) {
+      console.error("Image compression failed, falling back to raw base64:", err);
+      try {
+        const dataUrl = await fileToBase64(file);
+        setProfile((p) => ({ ...p, profile_picture_url: dataUrl }));
+      } catch {
+        setProfileError("Failed to read file");
+      }
     }
   };
 
@@ -561,7 +566,7 @@ export const BottomNavbar = () => {
                     )}
                   </div>
                   <small className="text-secondary">
-                    From your device · max 1.5 MB
+                    From your device · auto-compressed
                   </small>
 
                   <input

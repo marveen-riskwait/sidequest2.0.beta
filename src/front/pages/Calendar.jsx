@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Spinner, Alert } from "react-bootstrap";
 import {
   FiChevronLeft, FiChevronRight, FiCalendar, FiClock, FiMapPin,
@@ -61,6 +62,7 @@ function buildCells(year, month) {
 
 // ─── COMPONENT ────────────────────────────────────────────────────────────────
 export const Calendar = ({ embedded = false } = {}) => {
+  const navigate = useNavigate();
   const today = new Date();
   const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
 
@@ -271,6 +273,18 @@ export const Calendar = ({ embedded = false } = {}) => {
                         )}
                       </div>
 
+                      {ev.latitude != null && ev.longitude != null && (
+                        <button
+                          className="cal-map-link"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/map?event=${ev.id}`);
+                          }}
+                        >
+                          <FiMapPin size={11} /> View on map
+                        </button>
+                      )}
+
                       {showResponseBar(ev) && (
                         <div className="cal-rsvp" onClick={(e) => e.stopPropagation()}>
                           <button
@@ -457,4 +471,20 @@ const CSS = `
 .cal-rsvp-btn.active.maybe     { background: rgba(250,204,21,0.15); border-color: #facc15; color: #facc15; }
 .cal-rsvp-btn.active.not_going { background: rgba(244,63,94,0.15);  border-color: #f43f5e; color: #f43f5e; }
 .cal-rsvp-btn:disabled { opacity: 0.45; pointer-events: none; }
+.cal-map-link {
+  margin-top: 6px;
+  background: transparent;
+  border: 1px solid #2a8cf0;
+  color: #2a8cf0;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.cal-map-link:hover { background: #2a8cf0; color: #fff; }
 `;
