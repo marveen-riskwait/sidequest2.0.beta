@@ -1,36 +1,16 @@
 import L from "leaflet";
 
-// The fallback image shown when the event has no picture and the creator
-// has no profile photo.  Must live in /public/ so Vite serves it at "/".
-export const FALLBACK_LOGO = "/logoSideQuest.png";
+// Fallback shown when neither the event nor its creator has a picture.
+// Asset must live in /public/ so Vite serves it at the root URL.
+export const FALLBACK_LOGO = "/sidequest-logo.png";
 
-/**
- * Pick the best image for a map marker, in priority order:
- *   1. event.image        — cover photo uploaded for the event
- *   2. event.creator_picture — creator's profile picture (from serialize())
- *   3. FALLBACK_LOGO      — SideQuest logo on dark background
- */
+// Resolve the URL chain: event.image → event.creator_picture → SQ logo.
 export const pickMarkerImage = (event) =>
   event?.image || event?.creator_picture || FALLBACK_LOGO;
 
-/**
- * First letter to show when an event has no image and no creator photo —
- * derived from the event title, then creator username/email. Used as a
- * friendlier fallback than the bare logo on the map.
- */
-export const pickMarkerLetter = (event) => {
-  const candidate =
-    event?.title?.trim() ||
-    event?.creator_username?.trim() ||
-    event?.creator_email?.trim() ||
-    "";
-  return candidate ? candidate.charAt(0).toUpperCase() : "";
-};
-
-/** Returns true when the URL points to our own fallback logo. */
-const isLogoFallback = (url) => url === FALLBACK_LOGO;
-
-// Lightweight XSS escape — tooltip text comes from user-supplied event titles.
+// Lightweight escape so the text we inject into the divIcon HTML can never
+// break out of attribute/tag boundaries. Avoids XSS if the title comes
+// from user input.
 const escapeHTML = (str = "") =>
   String(str)
     .replace(/&/g, "&amp;")
@@ -39,98 +19,163 @@ const escapeHTML = (str = "") =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
+// First letter shown when the SQ logo image also fails to load — gives
+// the marker a non-broken last-resort visual instead of an empty circle.
+const initialLetter = (event) => {
+  const candidate =
+    event?.title?.trim() ||
+    event?.creator_username?.trim() ||
+    event?.creator_email?.trim() ||
+    "?";
+  return escapeHTML(candidate.charAt(0).toUpperCase());
+};
+
 /**
- * Build a Leaflet divIcon that renders:
+ * Build a Leaflet divIcon. Layout:
  *
- *   ┌──────────────────────────┐   ← .avatar-marker-tip (hover only)
- *   │  Evento · mañana · 4:50  │
- *   └────────────┬─────────────┘
- *                ↓
- *        ╭──────────╮            ← .avatar-marker  (circle, single white border)
- *        │  photo / │
- *        │   logo   │
- *        ╰──────────╯
- *           ╭──────╮             ← .avatar-marker-going  (gradient pill, below)
- *           │ 3 voy│
- *           ╰──────╯
+ *   [tooltip ↑ — visible only on :hover, ergonomic, fades]
+ *        ⭕ avatar (event/creator/logo)
+ *        ━━━━━━━━━     ← no gap, the count pill is attached to the
+ *        [ 3 going ]       bottom edge of the avatar
  *
- * Design decisions:
- *  - Single 2px white border (matches "variante actual").
- *  - Going-pill sits BELOW the circle so it never overlaps the tooltip.
- *  - Tooltip is CSS :hover only — never fires on touch (avoids iOS sticky-hover bug).
- *  - Logo fallback gets `has-logo` class → object-fit:contain + dark bg padding.
+ * Everything visual is inline-styled inside the divIcon HTML so it cannot
+ * be broken by external CSS cascades — that is what makes wide / tall /
+ * weird-aspect images stay perfectly circular at exactly `size × size`.
+ *
+ * The structure has TWO layers on purpose:
+ *
+ *   .sq-marker-wrapper   → overflow: visible — lets the pill + tooltip
+ *                          escape the circle's bounds.
+ *   inner circle <div>   → overflow: hidden + fixed width/height +
+ *                          box-sizing: border-box — the IMAGE inside it
+ *                          can NEVER push the marker wider, no matter
+ *                          what aspect ratio it has.
+ *
+ * The :hover rule MUST come from a stylesheet (CSS files don't run inline),
+ * so it lives in Mapview.jsx via a <style> block on .sq-marker-wrapper:hover.
+ *
+ * The icon anchor sits at the bottom-centre of the AVATAR (not of the
+ * count pill) so the map coordinate stays attached to the head of the
+ * pin, exactly like a classic Leaflet marker.
  */
-export const createMarkerAvatar = (
-  imageUrl,
-  size = 56,
-  goingCount = 0,
-  tooltipText = "",
-  initialLetter = ""
-) => {
-  const useLogo = isLogoFallback(imageUrl);
-  // When we'd otherwise show the bare logo but we have a letter, show the
-  // letter instead — friendlier and identifies the event at a glance.
-  const useLetter = useLogo && !!initialLetter;
-  const logoClass = useLogo && !useLetter ? " has-logo" : "";
-  const letterClass = useLetter ? " has-letter" : "";
+export const createMarkerAvatar = (event, size = 56, goingCount = 0, tooltipText = "") => {
+  // Accept either an event object OR a plain URL string (back-compat with
+  // call sites that resolve the image themselves).
+  const imageUrl = typeof event === "string" ? event : pickMarkerImage(event);
+  const letter   = typeof event === "string" ? "?" : initialLetter(event);
 
-  const parts = [];
-  parts.push(
-    `<div class="avatar-marker${logoClass}${letterClass}" style="width:${'56px'}px;height:${'56px'}px;">`
-  );
+  // === Inline styles ===
+  // Wrapper: positions everything; overflow VISIBLE so the pill / tooltip
+  // can stick out above and below the circle without being clipped.
+  const wrapStyle =
+    `width:${size}px;height:${size}px;position:relative;` +
+    `display:flex;align-items:flex-start;justify-content:center;`;
 
-  // Tooltip (hover only — rendered first so z-index stacking is correct)
-  if (tooltipText) {
-    parts.push(
-      `<span class="avatar-marker-tip">${escapeHTML(tooltipText)}</span>`
-    );
-  }
+  // Inner circle: fixed size + overflow HIDDEN. This is the magic that
+  // makes any image (wide JPG, tall portrait) render as a perfect circle
+  // without ever pushing the marker wider. box-sizing keeps the 2px white
+  // border INSIDE the size × size box.
+  const circleStyle =
+    `width:${size}px;height:${size}px;border-radius:50%;` +
+    `overflow:hidden;border:2px solid #fff;` +
+    `box-shadow:0 2px 8px rgba(0,0,0,0.4);` +
+    `background:linear-gradient(135deg,#6366f1,#ec4899);` +
+    `display:flex;align-items:center;justify-content:center;` +
+    `color:#fff;font-weight:700;font-size:1.1rem;` +
+    `box-sizing:border-box;`;
 
-  // Avatar: letter fallback, else image
-  if (useLetter) {
-    parts.push(
-      `<span class="avatar-marker-letter">${escapeHTML(initialLetter)}</span>`
-    );
-  } else if (imageUrl) {
-    parts.push(
-      `<img src="${escapeHTML(imageUrl)}" alt="avatar" loading="lazy"/>`
-    );
-  }
+  // The logo asset is much taller than wide — `contain` at 65/55%
+  // keeps it readable and centred inside the circle's gradient.
+  // Real photos use full cover so they fill the circle.
+  const imgStyle = (imageUrl === FALLBACK_LOGO)
+    ? `width:65%;height:55%;object-fit:contain;display:block;`
+    : `width:100%;height:100%;object-fit:cover;display:block;`;
 
-  // "N going" pill — below the circle
-  if (goingCount && goingCount > 0) {
-    parts.push(
-      `<span class="avatar-marker-going">${
-        goingCount > 99 ? "99+" : goingCount
-      } going</span>`
-    );
-  }
+  // Count pill: position:absolute top:100% so it sits right at the
+  // bottom edge of the avatar with NO gap. translateY(-50%) tucks half
+  // of it under the border, giving the "attached" look. Doesn't affect
+  // the iconSize box because it's absolutely positioned.
+  const countStyle =
+    `position:absolute;left:50%;top:100%;` +
+    `transform:translate(-50%,-50%);` +
+    `background:linear-gradient(135deg,#22d3ee,#4f46e5);` +
+    `color:#fff;font-size:0.66rem;font-weight:700;` +
+    `padding:2px 8px;border-radius:999px;` +
+    `white-space:nowrap;border:2px solid #0b0d12;` +
+    `box-shadow:0 1px 4px rgba(0,0,0,0.5);` +
+    `pointer-events:none;line-height:1.15;z-index:5;`;
 
-  parts.push(`</div>`);
+  // Tooltip: smaller font, subtle background, fades. Hidden by default
+  // (opacity:0); the :hover rule in Mapview's <style> block bumps it
+  // to opacity:1 when the wrapper is hovered.
+  const tipStyle =
+    `position:absolute;bottom:calc(100% + 10px);left:50%;` +
+    `transform:translateX(-50%);` +
+    `background:rgba(22,25,34,0.96);color:#e9ecef;` +
+    `border:1px solid #262a36;border-radius:10px;` +
+    `padding:5px 10px;font-size:0.8rem;font-weight:500;` +
+    `white-space:nowrap;` +
+    `opacity:0;pointer-events:none;` +
+    `transition:opacity 0.18s ease, transform 0.18s ease;` +
+    `box-shadow:0 6px 18px rgba(0,0,0,0.45);` +
+    `z-index:10;`;
 
-  // iconAnchor Y is pushed down by ~14px to account for the pill below
-  // so Leaflet still pins the circle centre to the lat/lng, not the pill.
-  const pillOffset = goingCount > 0 ? 14 : 0;
+  // === HTML ===
+  // The <img> has an onerror handler that swaps the image for the
+  // initial letter if the asset 404s or fails to decode. That way we
+  // always show SOMETHING, even when the logo/picture is broken.
+  const inner = imageUrl
+    ? `<img src="${escapeHTML(imageUrl)}" alt="" loading="lazy" style="${imgStyle}" onerror="this.style.display='none';this.parentElement.innerHTML='${letter}';"/>`
+    : `<span>${letter}</span>`;
+
+  const html =
+    `<div class="sq-marker-wrapper" style="${wrapStyle}">` +
+      `<div style="${circleStyle}">${inner}</div>` +
+      (goingCount > 0
+        ? `<span style="${countStyle}">${goingCount > 99 ? "99+" : goingCount} going</span>`
+        : "") +
+      (tooltipText
+        ? `<span class="sq-marker-tip-floater" style="${tipStyle}">${escapeHTML(tooltipText)}</span>`
+        : "") +
+    `</div>`;
 
   return L.divIcon({
-    html: parts.join(""),
-    className: "marker-avatar-icon",
-    iconSize:   [size, size + pillOffset],
-    iconAnchor: [size / 2, size],      // pin the BOTTOM of the circle
+    html,
+    className: "sq-marker-icon",
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size],   // anchor at bottom of AVATAR
   });
 };
 
-/** React component variant — used outside the map (lists, modal rows, etc.) */
-export const MarkerAvatar = ({ src, alt = "avatar", size = 56 }) => {
-  const useLogo = isLogoFallback(src || FALLBACK_LOGO);
-  return (
-    <div
-      className={`avatar-marker${useLogo ? " has-logo" : ""}`}
-      style={{ width: size, height: size }}
-    >
-      {src && <img src={src} alt={alt} loading="lazy" />}
-    </div>
-  );
-};
+/** Component variant used outside the map (lists, modal rows, etc.).
+ *  Same inline-style philosophy as createMarkerAvatar — image is locked
+ *  inside a fixed circle, so a wide picture is cropped, never stretched. */
+export const MarkerAvatar = ({ src, alt = "avatar", size = 56 }) => (
+  <div
+    style={{
+      width: size,
+      height: size,
+      borderRadius: "50%",
+      overflow: "hidden",
+      border: "2px solid #fff",
+      boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
+      background: "linear-gradient(135deg,#6366f1,#ec4899)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      boxSizing: "border-box",
+      flexShrink: 0,
+    }}
+  >
+    {src && (
+      <img
+        src={src}
+        alt={alt}
+        loading="lazy"
+        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+      />
+    )}
+  </div>
+);
 
 export default MarkerAvatar;
