@@ -7,10 +7,25 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 import useGlobalReducer from "../hooks/useGlobalReducer";
-import { createMarkerAvatar, pickMarkerImage, pickMarkerLetter } from "./MarkerAvatar";
+import { createMarkerAvatar } from "./MarkerAvatar";
 import MapClickHandler from "./MapClickHandler";
 import { EventModal } from "./EventModal";
 import "./mapview.css";
+
+// Hover rule for the marker tooltip — has to live in a stylesheet (CSS
+// rules don't run inline), so we inject it once via a <style> tag at the
+// top of the rendered tree. Everything else about the marker is inline
+// inside createMarkerAvatar to avoid cascade fights.
+const MARKER_HOVER_CSS = `
+.sq-marker-icon { background: transparent !important; border: 0 !important; }
+.sq-marker-wrapper:hover .sq-marker-tip-floater {
+  opacity: 1 !important;
+  transform: translateX(-50%) translateY(-2px) !important;
+}
+@media (hover: none) {
+  .sq-marker-wrapper:hover .sq-marker-tip-floater { opacity: 0 !important; }
+}
+`;
 
 const MADRID = [40.4168, -3.7038];
 const computeCenter = (userCenter) => userCenter || MADRID;
@@ -339,6 +354,7 @@ export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
 
   return (
     <Container fluid className="map-page p-0">
+      <style>{MARKER_HOVER_CSS}</style>
       {loading && (
         <div className="text-center py-3">
           <Spinner animation="border" size="sm" />
@@ -386,11 +402,10 @@ export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
               key={event.id}
               position={event.position}
               icon={createMarkerAvatar(
-                pickMarkerImage(event),
+                event,
                 56,
                 event.going_count || 0,
-                formatTooltip(event),
-                pickMarkerLetter(event)
+                formatTooltip(event)
               )}
               eventHandlers={{ click: () => handleMarkerClick(event) }}
             />
