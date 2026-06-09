@@ -58,14 +58,32 @@ const apiRespond = (eventId, response) =>
 
 const CSS = `
 .events-list-page {
-  min-height: 100vh;
+  /* min-height: 100dvh en lugar de 100vh para que iOS Safari no
+     "salte" cuando aparece/desaparece la barra de URL. */
+  min-height: 100dvh;
   background:
     radial-gradient(1200px 600px at 10% -10%, rgba(99, 102, 241, 0.15), transparent 60%),
     radial-gradient(900px 500px at 100% 10%, rgba(236, 72, 153, 0.10), transparent 60%),
     #0b0d12;
   color: #e9ecef;
   padding-top: 80px;
-  padding-bottom: 100px;
+  /* Reservamos espacio abajo igual al alto de la pill flotante
+     + el safe-area-inset-bottom (iPhones con home indicator) */
+  padding-bottom: calc(100px + env(safe-area-inset-bottom));
+
+  /* ── FIX bug #1 — Cards de eventos desbordan a la derecha ──
+     A viewport <390px (iPhone SE/14), la combinación de:
+       - Container px-3 (12px cada lado)
+       - Row.g-3 con margins negativos
+       - Card con border-radius 14px + box-shadow al hover
+       - event-card-img de width:100% sobre Card sin clip estricto
+     producía un pixel-overflow visible a la derecha.
+     overflow-x:clip lo elimina sin crear stacking context
+     (clip > hidden en este caso porque no permite scroll
+     accidental). El radial-gradient sigue cubriendo todo el page.
+     Fallback a hidden para navegadores antiguos. */
+  overflow-x: hidden;
+  overflow-x: clip;
 }
 .event-card {
   background: #161922;
@@ -75,7 +93,11 @@ const CSS = `
   transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
   cursor: pointer;
   overflow: hidden;
-  bottom: 0px;
+  /* "bottom: 0px" estaba aquí — no hace nada porque .event-card
+     no es position relative/absolute; pero confunde al lector y
+     puede activarse si alguien añade position más adelante.
+     Quitado. */
+  max-width: 100%;   /* nunca exceder el ancho de la Col */
 }
 .event-card:hover {
   border-color: #3a3f55;

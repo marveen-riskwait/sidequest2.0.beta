@@ -152,8 +152,55 @@ const FRIENDS_CSS = `
   text-decoration: none;
   flex: 1;
   min-width: 0;
+  /* Clip cualquier hijo que se pase. La columna de texto se trunca abajo. */
+  overflow: hidden;
 }
 .friend-row-link:hover { color: #fff; }
+
+/* ── FIX bug #4 — Estado de request se superpone con info ────────
+   Cada fila de incoming/outgoing es:
+     <ListGroup.Item d-flex flex-wrap justify-content-between>
+       <Link friend-row-link d-flex align-items-center gap-3>
+         <div style={avatarStyle(...)}>   ← avatar (style inline)
+         <div>                            ← columna texto
+           <div>{email}</div>             ← sin truncate
+           <div>Sent/Waiting {fecha}</div>← sin truncate
+         </div>
+       </Link>
+       <Button>Cancel</Button>            ← outgoing
+       o
+       <div d-flex gap-2>                 ← incoming (Accept + Refuse)
+         <Button>Accept</Button>
+         <Button>Refuse</Button>
+       </div>
+     </ListGroup.Item>
+   El problema:
+     - La columna de texto sin min-width:0 → el email NO encoge.
+     - El email/fecha sin white-space:nowrap+ellipsis → spillea al lado.
+     - Las acciones sin flex-shrink:0 → cuando hay poco espacio se
+       superponen visualmente con el final del texto.
+   Fix:
+     - Columna de texto (la que NO tiene style inline) recibe
+       min-width:0 + flex:1 para que encoja correctamente.
+     - Ambas lineas internas truncan con ellipsis.
+     - Cluster de acciones (botón único o div con varios) recibe
+       flex-shrink:0 para no comprimirse jamás.
+   ─────────────────────────────────────────────────────────────── */
+.friend-row-link > div:not([style]) {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+.friend-row-link > div:not([style]) > div {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.friends-page .list-group-item > .d-flex.gap-2,
+.friends-page .list-group-item > .btn {
+  flex-shrink: 0;
+}
 `;
 
 // =============================================================

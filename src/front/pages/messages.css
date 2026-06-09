@@ -2,21 +2,62 @@
    Messages page — SideQuest dark theme
    (coherente con Navbar, EventModal, Friends: #0f111a, #161922,
     #262a36, indigo #6366f1, rosa #ec4899)
+
+   ── FIX: bugs #3 + #11 ───────────────────────────────────────
+   - #11 (header tapado por top navbar): la media-query móvil
+     usaba margin-top:60px pero la navbar real mide ~64-70px.
+     Subido a 70px (igual que desktop) para que el header del
+     thread quede SIEMPRE bajo la navbar.
+   - #3  (composer tapado por pill bottom-nav): la altura del
+     layout era calc(100vh - 70px), o sea iba hasta el fondo
+     del viewport, y la pill flotante quedaba encima → composer
+     escondido. Reducido a calc(100vh - 70px - 100px - safe-area)
+     para dejar espacio libre debajo del composer.
+
+   ── DE PASO (parte del fix global #5) ────────────────────────
+   - 100vh → 100dvh: en iOS Safari el viewport "salta" cuando
+     aparece/desaparece la barra de URL, 100dvh respeta el
+     viewport dinámico real.
+   - env(safe-area-inset-bottom): respeta el home-indicator
+     de iPhones con notch.
    ───────────────────────────────────────────────────────────── */
 
 .sq-msg-page {
-  min-height: 100vh;
+  min-height: 100dvh;
   background:
     radial-gradient(1200px 600px at 10% -10%, rgba(99, 102, 241, 0.15), transparent 60%),
     radial-gradient(900px 500px at 100% 10%, rgba(236, 72, 153, 0.10), transparent 60%),
     #0b0d12;
   color: #e9ecef;
-  padding: 0;
+  /* ── FIX bug "barra blanca arriba" ────────────────────────────
+     ANTES poníamos margin-top:70px sobre .sq-msg-layout (hijo)
+     para bajar el chat debajo del navbar. PROBLEMA: en CSS, el
+     margin-top de un hijo COLAPSA con el del padre si éste no
+     tiene padding-top / border-top / overflow:hidden. Resultado:
+     el .sq-msg-page entero se desplazaba 70px hacia abajo y
+     dejaba ver el <body> (o el <html>) por encima → barra blanca.
+     SOLUCIÓN: padding-top en el PADRE, sin margin en el hijo.
+     padding NO colapsa.                                          */
+  padding: 70px 0 0 0;
 }
 
-.sq-msg-layout {
-  height: calc(100vh - 70px);
-  margin-top: 70px;
+/* Layout principal (lista + thread).
+   Reservamos:
+     - 70px ARRIBA  → ya consumidos por padding-top del .sq-msg-page
+     - 100px ABAJO  → para que la pill bottom-nav flotante
+                      (.sq-bottom-nav, position:fixed) NO tape
+                      el composer del chat. La pill mide ~66px
+                      + 1rem de offset desde el fondo, dejamos
+                      buffer hasta 100px + safe-area-inset-bottom
+                      (iPhones con home indicator).
+
+   IMPORTANTE — especificidad:
+   Subimos a 2-clases (.sq-msg-page .sq-msg-layout) para vencer
+   tanto a Bootstrap `.row` (que define margin) como a la regla
+   global de index.css en su @supports. */
+.sq-msg-page .sq-msg-layout {
+  height: calc(100dvh - 70px - 100px - env(safe-area-inset-bottom));
+  margin: 0 !important;  /* anulamos cualquier margen heredado de .row */
 }
 
 /* ── Lista de chats (izq) ─────────────────────────── */
@@ -292,15 +333,37 @@
 
 .sq-msg-img {
   display: block;
-  max-width: 260px;
+  /* ── FIX bug "foto desborda el bubble" ──────────────────────
+     ANTES: max-width:260px (en px absolutos) era MAYOR que el
+     contenido interno del bubble en móvil (bubble = 70% del
+     thread ≈ 250px, menos padding 26px → 224px utiles, vs
+     260px de imagen). La imagen salía rebozada del bubble.
+     AHORA: max-width:100% del bubble (relativo), con un cap
+     duro a 320px en pantallas grandes para que no se haga
+     gigantesca en desktop. height:auto preserva ratio.        */
+  max-width: 100%;
+  width: auto;
   max-height: 300px;
+  height: auto;
   border-radius: 8px;
   margin-bottom: 0.3rem;
   cursor: zoom-in;
 }
+/* En thread >480px usamos un cap superior para que no se vea
+   diminuta en desktop. */
+@media (min-width: 480px) {
+  .sq-msg-img {
+    max-width: min(100%, 320px);
+  }
+}
+
 .sq-msg-audio {
   display: block;
-  width: 240px;
+  /* Mismo problema que la imagen: width:240px en px absolutos
+     desbordaba en bubble estrecho. width:100% con cap 240px
+     se adapta al bubble. */
+  width: 100%;
+  max-width: 240px;
   margin-bottom: 0.3rem;
 }
 .sq-msg-text {
@@ -425,9 +488,3 @@
 }
 .sq-msg-modal .modal-header,
 .sq-msg-modal .modal-footer { border-color: #262a36; }
-
-/* Responsive */
-@media (max-width: 767.98px) {
-  .sq-msg-layout { height: calc(100vh - 60px); margin-top: 60px; }
-  .sq-msg-list, .sq-msg-thread-wrap { height: 100%; }
-}

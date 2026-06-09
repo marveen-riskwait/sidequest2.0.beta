@@ -149,6 +149,41 @@ const PROFILE_CSS = `
 /* Hide when any Bootstrap modal is open */
 body.modal-open .sq-bottom-nav { display: none; }
 
+/* ── FIX bug #9 — Pill no cabe en iPhone SE (320px) ──────
+   Cálculo del ancho de la pill por defecto:
+     5 items: 4 normales (58px) + 1 create (50px) = 282px
+     gaps:    4 × 4px = 16px
+     padding: 2 × 8.8px (0.55rem) = 17.6px
+     border:  2 × 1px = 2px
+     TOTAL:   ~318px → cabe en 320 con 2px de margen, pero el
+     padding lateral del viewport (y el shadow) lo empuja fuera.
+   En <360px reducimos un poco todo para que entre cómodo y
+   quede igual de "tappable" (touch targets ≥40×40px guideline
+   de iOS HIG). 48×40 sigue siendo accesible. */
+@media (max-width: 359.98px) {
+  .sq-bottom-nav {
+    gap: 0.2rem;
+    padding: 0.35rem 0.45rem;
+  }
+  .sq-bottom-nav-item {
+    width: 48px;
+    height: 40px;
+  }
+  .sq-bottom-nav-create {
+    width: 44px;
+    height: 44px;
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.45);
+  }
+  .sq-bottom-nav-item svg {
+    width: 20px;
+    height: 20px;
+  }
+  .sq-bottom-nav-create svg {
+    width: 22px;
+    height: 22px;
+  }
+}
+
 
 /* ─────────────────────────────────────────────────────
    Profile modal

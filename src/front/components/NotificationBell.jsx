@@ -154,6 +154,32 @@ const BELL_CSS = `
   overflow-y: auto;
   padding: 0;
 }
+
+/* ── FIX bug #2 — Dropdown de notificaciones desborda izquierda ──
+   Con <Dropdown align="end"> Bootstrap+Popper alinean el menú a
+   la derecha del TOGGLE (la campana). Como la campana está en
+   mitad de la navbar y el menú mide 360px, en móvil se extiende
+   por la izquierda y se sale del viewport.
+   Fix móvil (<576px): forzar position:fixed con left/right 8px,
+   asi el menú queda anclado al viewport, no a la campana.
+   - transform:none anula el translate3d() de Popper.
+   - inset usa shorthand: top/right/bottom/left.
+   - max-width:none anula los 360px fijos para que se adapte.
+   ───────────────────────────────────────────────────────────── */
+@media (max-width: 575.98px) {
+  .sq-bell-menu {
+    position: fixed !important;
+    top: 64px !important;      /* navbar (~56-60px) + 4-8px de aire */
+    left: 8px !important;
+    right: 8px !important;
+    width: auto !important;
+    max-width: none !important;
+    transform: none !important;
+    margin: 0 !important;
+    /* Aseguramos que se pinta sobre el resto del contenido */
+    z-index: 1050;
+  }
+}
 .sq-bell-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 0.7rem 0.9rem;

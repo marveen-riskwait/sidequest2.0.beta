@@ -271,7 +271,41 @@ const EVENT_CSS = `
   background: transparent !important;
   border-color: #262a36 !important;
   color: #e9ecef !important;
+  /* Bloquear scroll horizontal en la fila aunque haya un email largo. */
+  overflow: hidden;
 }
+
+/* ── FIX bug #10 — Email largo + badge "Creator" desborda ────────
+   El JSX de cada participante es:
+     <ListGroup.Item class="event-participant-row d-flex ...">
+       <div class="d-flex align-items-center gap-2">   ← (A)
+         <img/avatar />                                 ← fixed size
+         <span>{email}</span>                           ← (B) crece sin freno
+         <Badge>Creator</Badge>                         ← (C) badge
+         <Badge class="sq-rsvp-pill">Going</Badge>      ← (D) badge
+       </div>
+       <Button trash />                                 ← (E)
+     </ListGroup.Item>
+   Con email largo, (B) empujaba a (C) y (D) fuera del row.
+   - (A) recibe min-width:0 + flex:1 para poder encoger.
+   - (B) primer <span> dentro recibe truncate con ellipsis.
+   - (C) y (D) flex-shrink:0 para que NUNCA se compriman ni salgan.
+   ───────────────────────────────────────────────────────────────── */
+.event-participant-row > div:first-child {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.event-participant-row > div:first-child > span {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.event-participant-row .badge {
+  flex-shrink: 0;
+}
+
 body.modal-open .bottom-navbar { display: none; }
 
 /* ── RESPONSE BAR (Going / Maybe / Not going) ── */
