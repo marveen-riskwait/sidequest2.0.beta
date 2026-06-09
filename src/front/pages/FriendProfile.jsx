@@ -418,12 +418,15 @@ export const FriendProfile = () => {
                       {profile.city && (
                         <span><FiMapPin className="me-1" />{profile.city}</span>
                       )}
-                      {profile.email && (
-                        <span><FiMail className="me-1" />{profile.email}</span>
-                      )}
-                      {profile.phone && (
-                        <span><FiPhone className="me-1" />{profile.phone}</span>
-                      )}
+                      {/* RGPD: NO mostramos el email de OTRO usuario.
+                          Esto era scraping-friendly + violación directa
+                          de protección de datos personales. El email
+                          es un dato identificable y NUNCA debe aparecer
+                          en un perfil ajeno. El teléfono también se ha
+                          quitado por la misma razón (PII sensible). */}
+                      {/* phone también queda fuera por RGPD; si en el
+                          futuro queréis mostrarlo, que el dueño del
+                          perfil pueda hacer opt-in en su configuración */}
                     </div>
 
                     <div className="d-flex align-items-center gap-2 flex-wrap">

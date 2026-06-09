@@ -157,7 +157,8 @@ const initials = (user) => {
   const f = (user.first_name || "").trim().charAt(0);
   const l = (user.last_name || "").trim().charAt(0);
   if (f || l) return `${f}${l}`.toUpperCase();
-  return (user.username || user.email || "?").charAt(0).toUpperCase();
+  // RGPD: solo username como fallback, JAMÁS email.
+  return (user.username || "?").charAt(0).toUpperCase();
 };
 
 const fullName = (user) => {
@@ -363,9 +364,13 @@ export const Profile = () => {
                       {profile.city && (
                         <span><FiMapPin className="me-1" />{profile.city}</span>
                       )}
-                      {profile.email && (
-                        <span><FiMail className="me-1" />{profile.email}</span>
-                      )}
+                      {/* RGPD / política interna: el email no se muestra
+                          NUNCA en la app, ni siquiera en el propio perfil
+                          del usuario. El email solo aparece en el form de
+                          edit como campo disabled (para que el usuario
+                          recuerde con qué cuenta está logueado) y en
+                          contextos de autenticación (login). Para
+                          contactarte públicamente usá @username. */}
                       {profile.phone && (
                         <span><FiPhone className="me-1" />{profile.phone}</span>
                       )}
@@ -521,12 +526,23 @@ export const Profile = () => {
 
             <Col md={6}>
               <Form.Label>Email</Form.Label>
+              {/* RGPD: este es el ÚNICO sitio en toda la app donde
+                  aparece el email — y solo el del propio usuario,
+                  disabled, dentro de SU formulario de edit, jamás
+                  visible para terceros. Justificado porque:
+                  (a) el usuario necesita saber con qué cuenta está
+                      logueado para recordar credenciales;
+                  (b) está dentro de un Modal protegido por auth;
+                  (c) no es scrapeable por bots.
+                  Si quieres eliminarlo del todo, sustituye por una
+                  pista enmascarada estilo `j***@example.com`. */}
               <Form.Control
                 value={profile?.email || ""}
                 disabled
                 placeholder="—"
+                aria-label="Your account email (read-only)"
               />
-              <small className="text-secondary">No editable</small>
+              <small className="text-secondary">Not editable — contact support to change</small>
             </Col>
 
             <Col md={6}>

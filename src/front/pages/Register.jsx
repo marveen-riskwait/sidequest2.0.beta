@@ -68,6 +68,32 @@ const AUTH_CSS = `
 	font-weight: 600;
 }
 .sq-auth-link:hover { color: #ec4899; }
+
+/* Tanda 4D — Checkbox de aceptación de Terms.
+   Bootstrap pone el check en azul brand por defecto; lo
+   sincronizamos con la paleta indigo de SideQuest para
+   coherencia visual. */
+.sq-auth-card .form-check-input {
+	background-color: #0f111a;
+	border: 1px solid #2a2f42;
+	width: 1.1rem;
+	height: 1.1rem;
+	margin-top: 0.2rem;
+}
+.sq-auth-card .form-check-input:checked {
+	background-color: #6366f1;
+	border-color: #6366f1;
+}
+.sq-auth-card .form-check-input:focus {
+	border-color: #6366f1;
+	box-shadow: 0 0 0 0.15rem rgba(99,102,241,0.25);
+}
+.sq-auth-card .form-check-label {
+	cursor: pointer;
+	padding-left: 0.4rem;
+	line-height: 1.4;
+}
+
 .sq-auth-hint {
 	color: #6c757d;
 	font-size: 0.72rem;
@@ -82,12 +108,46 @@ export const Register = () => {
 	const [email, setEmail] = useState("");
 	const [username, setUsername] = useState("");
 	const [password, setPassword] = useState("");
+	// Tanda 4D — consentimiento explícito de Terms + Privacy.
+	// Obligatorio por RGPD Art. 6.1.a (consent) y por buenas prácticas
+	// de cumplimiento. El botón Register SIEMPRE es clickable; si el
+	// usuario no ha marcado el checkbox al hacer click, mostramos un
+	// alert claro (mejor UX que un botón disabled que el usuario no
+	// sabe por qué no responde).
+	const [acceptedTerms, setAcceptedTerms] = useState(false);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState("");
+
+	// Helper: si el usuario marca el checkbox después de ver el error
+	// de "accept terms", limpiamos el mensaje para que no se quede
+	// estancado en pantalla.
+	const handleAcceptTermsChange = (checked) => {
+		setAcceptedTerms(checked);
+		if (checked && error && error.toLowerCase().includes("terms")) {
+			setError("");
+		}
+	};
 
 	const handleRegister = async (e) => {
 		e.preventDefault();
 		setError("");
+
+		// Validación de aceptación de Terms — el botón ya no está
+		// disabled, así que esta es la única barrera antes del submit.
+		// Si el usuario llega aquí sin marcar, mostramos un mensaje
+		// explícito y hacemos scroll al Alert para que sea visible
+		// (importante en móvil, donde el Alert puede caer fuera del
+		// viewport si el usuario está al final del form).
+		if (!acceptedTerms) {
+			setError("Please accept the Terms of Service and Privacy Policy to register your account.");
+			// Pequeño delay para que el Alert se renderice antes del scroll
+			setTimeout(() => {
+				const alertEl = document.querySelector(".sq-auth-card .alert");
+				if (alertEl) alertEl.scrollIntoView({ behavior: "smooth", block: "center" });
+			}, 50);
+			return;
+		}
+
 		setLoading(true);
 
 		try {
@@ -186,6 +246,40 @@ export const Register = () => {
 									minLength={6}
 									autoComplete="new-password"
 								/>
+							</Form.Group>
+
+							{/* Tanda 4D — Aceptación obligatoria de Terms + Privacy.
+							    `required` activa la validación HTML5 nativa del
+							    navegador, y el check JS-side en handleRegister
+							    es la red de seguridad. Los enlaces abren en una
+							    nueva pestaña para que el usuario no pierda lo
+							    que ya escribió en el form. */}
+							<Form.Group className="mb-4">
+								<Form.Check
+									type="checkbox"
+									id="register-accept-terms"
+									checked={acceptedTerms}
+									onChange={(e) => handleAcceptTermsChange(e.target.checked)}
+									label={
+										<span className="small text-secondary">
+											I have read and accept the{" "}
+											<Link to="/terms" target="_blank" rel="noreferrer" className="sq-auth-link">
+												Terms of Service
+											</Link>{" "}
+											and the{" "}
+											<Link to="/privacy" target="_blank" rel="noreferrer" className="sq-auth-link">
+												Privacy Policy
+											</Link>
+											.
+										</span>
+									}
+									aria-required="true"
+								/>
+								{/* Nota: quitamos `required` del checkbox para que el
+								    submit DEJE de bloquearse en la validación nativa
+								    del navegador. Ahora el flujo es: el botón siempre
+								    es clickable → handleRegister hace la validación →
+								    si no está marcado, muestra Alert visible. */}
 							</Form.Group>
 
 							<Button

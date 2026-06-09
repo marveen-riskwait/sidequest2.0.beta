@@ -1,6 +1,34 @@
 import { useState } from "react";
 import { Modal, Form, Button, Alert, Spinner } from "react-bootstrap";
-import { FiAtSign, FiLock, FiCheckCircle } from "react-icons/fi";
+import { FiAtSign, FiLock, FiCheckCircle, FiAlertTriangle } from "react-icons/fi";
+
+// ════════════════════════════════════════════════════════════════
+// ResetPasswordModal — MVP password reset flow
+// ════════════════════════════════════════════════════════════════
+//
+// ⚠️ NOTA DE SEGURIDAD IMPORTANTE
+// El backend (/api/reset-password) actualmente permite que
+// CUALQUIER persona con un email o username válido cambie la
+// contraseña, SIN verificación por email. Esto es un compromiso
+// MVP documentado en el propio routes.py:
+//
+//   "Intentionally simple for the MVP: identify by email OR
+//    username and set a new password immediately. This is NOT
+//    secure (...) and is meant to be replaced by an email-link
+//    flow once a real sender domain is available."
+//
+// El frontend muestra un disclaimer al usuario para que conozca
+// el estado y se complete la migración a email-link flow ANTES
+// de producción.
+//
+// Roadmap recomendado (backend):
+//   1. Endpoint POST /api/forgot-password { identifier }
+//      → genera token short-lived (15min), guarda hash en DB,
+//        envía email con link /reset-password?token=...
+//   2. Endpoint POST /api/reset-password { token, new_password }
+//      → verifica token, hash y expiración antes de cambiar.
+//   3. Rate limit en ambos.
+// ════════════════════════════════════════════════════════════════
 
 const MODAL_CSS = `
 .sq-reset-modal .modal-content {
@@ -32,6 +60,24 @@ const MODAL_CSS = `
 .sq-reset-submit:hover,
 .sq-reset-submit:focus {
 	background: linear-gradient(135deg, #4f46e5, #4338ca);
+}
+/* Aviso MVP — fondo ámbar tenue para que el usuario sepa que
+   el flujo se va a endurecer pronto sin asustarle demasiado. */
+.sq-reset-mvp-notice {
+	background: rgba(250, 204, 21, 0.10);
+	border: 1px solid rgba(250, 204, 21, 0.35);
+	color: #facc15;
+	border-radius: 10px;
+	padding: 0.6rem 0.75rem;
+	font-size: 0.78rem;
+	display: flex;
+	gap: 0.5rem;
+	align-items: flex-start;
+	margin-bottom: 1rem;
+}
+.sq-reset-mvp-notice svg {
+	flex-shrink: 0;
+	margin-top: 2px;
 }
 `;
 
@@ -115,6 +161,17 @@ export const ResetPasswordModal = ({ show, onHide }) => {
 						</div>
 					) : (
 						<>
+							{/* Disclaimer MVP — informa al usuario de que el
+							    flujo se va a endurecer (sin asustar). */}
+							<div className="sq-reset-mvp-notice" role="note">
+								<FiAlertTriangle size={16} aria-hidden="true" />
+								<span>
+									<strong>Heads up:</strong> we're rolling out email-based password
+									recovery soon. For now, recovery is direct — please choose a
+									strong password.
+								</span>
+							</div>
+
 							{error && (
 								<Alert variant="danger" onClose={() => setError("")} dismissible>
 									{error}

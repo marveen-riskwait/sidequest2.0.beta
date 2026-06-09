@@ -283,7 +283,8 @@ const initials = (user) => {
   const f = (user.first_name || "").trim().charAt(0);
   const l = (user.last_name || "").trim().charAt(0);
   if (f || l) return `${f}${l}`.toUpperCase();
-  return (user.email || "?").charAt(0).toUpperCase();
+  // RGPD: fallback al primer char del username, NUNCA del email.
+  return (user.username || "?").charAt(0).toUpperCase();
 };
 
 const levelColor = (level) => {
@@ -570,9 +571,15 @@ export const BottomNavbar = () => {
                     @{profile.username}
                   </div>
                 )}
-                <div className="text-secondary small mt-1">
-                  {profile.email}
-                </div>
+                {/* RGPD: en lugar del email del usuario (que NO debe
+                    aparecer en la UI), mostramos su nombre real si
+                    lo ha rellenado; si no, dejamos solo el @username
+                    arriba. */}
+                {(profile.first_name || profile.last_name) && (
+                  <div className="text-secondary small mt-1">
+                    {[profile.first_name, profile.last_name].filter(Boolean).join(" ")}
+                  </div>
+                )}
               </div>
 
               {/* STATS */}

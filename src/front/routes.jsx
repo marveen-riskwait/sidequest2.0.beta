@@ -16,6 +16,12 @@ import { FriendProfile } from "./pages/FriendProfile";
 import { EventsList } from "./pages/EventsList";
 import Map from "./pages/Map";
 import Messages from "./pages/Messages";
+// Tanda 4D — Legal pages (RGPD / LCEN / LSSI compliance).
+// Páginas estáticas públicas, enlazadas desde el SiteFooter y desde
+// el hamburger menu del Navbar.
+import { Terms } from "./pages/Terms";
+import { Privacy } from "./pages/Privacy";
+import { LegalNotice } from "./pages/LegalNotice";
 
 export const router = createBrowserRouter(
   createRoutesFromElements(
@@ -40,6 +46,13 @@ export const router = createBrowserRouter(
       {/* Messages — page dedicated */}
       <Route path="/messages" element={<Messages />} />
       <Route path="/messages/:roomId" element={<Messages />} />
+
+      {/* Legal — required by EU regulations (RGPD / LCEN / LSSI).
+          Públicas (sin auth) para que los buscadores y usuarios no
+          registrados puedan verlas. */}
+      <Route path="/terms" element={<Terms />} />
+      <Route path="/privacy" element={<Privacy />} />
+      <Route path="/legal" element={<LegalNotice />} />
     </Route>
   )
 );

@@ -206,13 +206,31 @@ const FRIENDS_CSS = `
 // =============================================================
 // HELPERS
 // =============================================================
-const initials = (email = "") =>
-  email
+// Genera 1-2 letras a partir del username (o email como fallback
+// legacy). El nombre del param era "email" porque originalmente
+// recibía la dirección; ahora recibe username pero la lógica
+// sigue funcionando porque .split("@")[0] sobre un username no
+// modifica nada (los usernames no llevan "@"). Renombrado para
+// claridad. */
+const initials = (nameOrEmail = "") =>
+  nameOrEmail
     .split("@")[0]
     .split(/[._-]/)
     .map((s) => s.charAt(0).toUpperCase())
     .join("")
     .slice(0, 2) || "?";
+
+// ── HARDENING búsqueda amigos (RGPD + anti-scraping) ─────────
+// MIN_SEARCH_CHARS: mínimo de caracteres antes de disparar la
+// búsqueda. Con 2 chars eras capaz de listar grandes porciones
+// de la base de usuarios; con 3 chars el espacio de búsquedas
+// posibles crece masivamente y se reduce el riesgo de scraping.
+// MAX_SEARCH_RESULTS: techo de resultados que MOSTRAMOS al user
+// (slice client-side). El backend probablemente devuelve más;
+// idealmente también se debería limitar en routes.py (LIMIT 20
+// en la query SQL) pero eso es backend.
+const MIN_SEARCH_CHARS = 3;
+const MAX_SEARCH_RESULTS = 20;
 
 const avatarStyle = (seed) => ({
   width: 44,
@@ -270,7 +288,12 @@ export const Friends = () => {
 
   // ---- debounced search ----
   useEffect(() => {
-    if (searchQ.trim().length < 2) {
+    // HARDENING: requerimos MIN_SEARCH_CHARS (=3) antes de pegarle
+    // al backend. Reduce drásticamente la superficie de scraping
+    // automatizado (con 2 chars un bot tenía 26²+26·10+10² ≈ 1300
+    // queries para barrer; con 3 chars son ~46k queries — mucho
+    // más caro y detectable por rate limit).
+    if (searchQ.trim().length < MIN_SEARCH_CHARS) {
       setSearchResults([]);
       return;
     }
@@ -278,7 +301,14 @@ export const Friends = () => {
     const t = setTimeout(async () => {
       try {
         const r = await apiSearchUsers(searchQ.trim());
-        setSearchResults(r);
+        // HARDENING: ademas del min de chars, cortamos a 20
+        // resultados visibles. Si el backend devuelve 200, el
+        // usuario sólo ve los primeros 20 + un mensaje
+        // pidiendo que afine la búsqueda.
+        const limited = Array.isArray(r) ? r.slice(0, MAX_SEARCH_RESULTS) : [];
+        // Guardamos el total real para mostrar el indicador.
+        limited.__total = Array.isArray(r) ? r.length : 0;
+        setSearchResults(limited);
       } catch (e) {
         setError(e.message);
       } finally {
@@ -299,7 +329,7 @@ export const Friends = () => {
     try {
       const { friendship } = await apiSendRequest({ user_id: target.id });
       dispatch({ type: "add_outgoing_request", payload: friendship });
-      showToast(`Request sent to ${target.email}`);
+      showToast(`Request sent to ${target.username}`);
       setSearchResults((rs) =>
         rs.map((r) =>
           r.id === target.id
@@ -320,7 +350,7 @@ export const Friends = () => {
       const { friendship } = await apiAcceptRequest(req.id);
       dispatch({ type: "remove_incoming_request", payload: req.id });
       dispatch({ type: "add_friend", payload: friendship });
-      showToast(`You are now friends with ${req.friend.email}`);
+      showToast(`You are now friends with ${req.friend.username}`);
     } catch (e) {
       showToast(e.message, "danger");
     } finally {
@@ -333,7 +363,7 @@ export const Friends = () => {
     try {
       await apiRefuseRequest(req.id);
       dispatch({ type: "remove_incoming_request", payload: req.id });
-      showToast(`Request from ${req.friend.email} refused`);
+      showToast(`Request from ${req.friend.username} refused`);
     } catch (e) {
       showToast(e.message, "danger");
     } finally {
@@ -346,7 +376,7 @@ export const Friends = () => {
     try {
       await apiCancelRequest(req.id);
       dispatch({ type: "remove_outgoing_request", payload: req.id });
-      showToast(`Request to ${req.friend.email} cancelled`);
+      showToast(`Request to ${req.friend.username} cancelled`);
     } catch (e) {
       showToast(e.message, "danger");
     } finally {
@@ -361,7 +391,7 @@ export const Friends = () => {
     try {
       await apiUnfriend(target.friend.id);
       dispatch({ type: "remove_friend", payload: target.friend.id });
-      showToast(`${target.friend.email} removed from friends`);
+      showToast(`${target.friend.username} removed from friends`);
     } catch (e) {
       showToast(e.message, "danger");
     } finally {
@@ -379,7 +409,7 @@ export const Friends = () => {
     if (!searchQ || tab !== "friends") return store.friends || [];
     const q = searchQ.toLowerCase();
     return (store.friends || []).filter((f) =>
-      f.friend?.email?.toLowerCase().includes(q)
+      f.friend?.username?.toLowerCase().includes(q)
     );
   }, [store.friends, searchQ, tab]);
 
@@ -428,8 +458,9 @@ export const Friends = () => {
                 type="text"
                 value={searchQ}
                 onChange={(e) => setSearchQ(e.target.value)}
-                placeholder="Search people by email (min. 2 chars)..."
+                placeholder={`Search people by username (min. ${MIN_SEARCH_CHARS} chars)...`}
                 className="bg-dark border-secondary text-light"
+                aria-label="Search people by username"
               />
               {searchQ && (
                 <Button variant="outline-secondary" onClick={() => setSearchQ("")}>
@@ -438,8 +469,15 @@ export const Friends = () => {
               )}
             </InputGroup>
 
+            {/* Tip si el usuario está entre 1 y MIN_SEARCH_CHARS-1 chars */}
+            {searchQ.trim().length > 0 && searchQ.trim().length < MIN_SEARCH_CHARS && (
+              <div className="mt-2 small text-secondary">
+                Type at least {MIN_SEARCH_CHARS} characters to search.
+              </div>
+            )}
+
             {/* search results — visible on every tab */}
-            {searchQ.trim().length >= 2 && (
+            {searchQ.trim().length >= MIN_SEARCH_CHARS && (
               <div className="mt-3">
                 <div className="small text-uppercase text-secondary mb-2 fw-semibold">
                   People found
@@ -458,9 +496,9 @@ export const Friends = () => {
                         className="bg-transparent text-light border-secondary d-flex justify-content-between align-items-center"
                       >
                         <div className="d-flex align-items-center gap-3">
-                          <div style={avatarStyle(u.id)}>{initials(u.email)}</div>
+                          <div style={avatarStyle(u.id)}>{initials(u.username)}</div>
                           <div>
-                            <div className="fw-semibold">{u.email}</div>
+                            <div className="fw-semibold">{u.username}</div>
                             <div className="small text-secondary">
                               {u.status === "none" && "Not connected"}
                               {u.status === "pending" &&
@@ -495,6 +533,18 @@ export const Friends = () => {
                       </ListGroup.Item>
                     ))}
                   </ListGroup>
+                )}
+
+                {/* Indicador "X of Y" cuando el backend devuelve más
+                    de los que mostramos. Empuja al usuario a afinar
+                    el query en vez de hacer scroll infinito en una
+                    lista parcial. */}
+                {!searching &&
+                  searchResults.__total > searchResults.length && (
+                  <div className="mt-2 small text-secondary fst-italic">
+                    Showing first {searchResults.length} of {searchResults.__total} matches —
+                    type more characters to narrow down.
+                  </div>
                 )}
               </div>
             )}
@@ -535,14 +585,14 @@ export const Friends = () => {
                         <Link
                           to={`/friends/${f.friend.id}`}
                           className="stretched-link"
-                          aria-label={`Open ${f.friend.email}'s profile`}
+                          aria-label={`Open ${f.friend.username}'s profile`}
                         />
                         <div style={avatarStyle(f.friend.id)}>
-                          {initials(f.friend.email)}
+                          {initials(f.friend.username)}
                         </div>
                         <div className="flex-grow-1 min-w-0">
                           <div className="text-light fw-semibold text-truncate">
-                            {f.friend.email}
+                            {f.friend.username}
                           </div>
                           <div className="small text-secondary">
                             Friends since{" "}
@@ -600,10 +650,10 @@ export const Friends = () => {
                   >
                     <Link to={`/friends/${req.friend.id}`} className="friend-row-link d-flex align-items-center gap-3">
                       <div style={avatarStyle(req.friend.id)}>
-                        {initials(req.friend.email)}
+                        {initials(req.friend.username)}
                       </div>
                       <div>
-                        <div className="fw-semibold">{req.friend.email}</div>
+                        <div className="fw-semibold">{req.friend.username}</div>
                         <div className="small text-secondary">
                           Sent {new Date(req.created_at).toLocaleString()}
                         </div>
@@ -659,10 +709,10 @@ export const Friends = () => {
                   >
                     <Link to={`/friends/${req.friend.id}`} className="friend-row-link d-flex align-items-center gap-3">
                       <div style={avatarStyle(req.friend.id)}>
-                        {initials(req.friend.email)}
+                        {initials(req.friend.username)}
                       </div>
                       <div>
-                        <div className="fw-semibold">{req.friend.email}</div>
+                        <div className="fw-semibold">{req.friend.username}</div>
                         <div className="small text-secondary">
                           <FiClock className="me-1" />
                           Waiting since{" "}
@@ -698,7 +748,7 @@ export const Friends = () => {
         </Modal.Header>
         <Modal.Body>
           Are you sure you want to remove{" "}
-          <strong>{confirmRemove?.friend?.email}</strong> from your friends? This
+          <strong>{confirmRemove?.friend?.username}</strong> from your friends? This
           cannot be undone &mdash; you will need to send a new request to
           reconnect.
         </Modal.Body>

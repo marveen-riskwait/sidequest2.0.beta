@@ -308,11 +308,57 @@ const BELL_CSS = `
 // MESSAGE RENDERING — one branch per notification type.
 // Keep the copy short; the bell row is narrow.
 // =====================================================
+
+// Fallback chain para mostrar el "actor" de la notificación.
+// Las notificaciones nuevas que crea el backend siempre incluyen
+// `*_username`. PERO las notificaciones VIEJAS (creadas antes de
+// la migración email→username) tienen `*_email` en el payload.
+// Cuando el frontend solo lee `*_username`, esas notificaciones
+// caen al fallback genérico "Someone" — lo que el usuario reporta.
+//
+// Solución sin tocar backend: extraer la parte LOCAL del email
+// (antes del "@") como puente. Es mucho menos sensible que el
+// email completo (no revela el dominio) y suele coincidir con el
+// username que la persona eligió.
+//
+// Ideal: backend hace una migración para rellenar `*_username`
+// en payloads existentes. Mientras, este fallback resuelve el UX.
+const localPartOf = (emailLike) => {
+    if (!emailLike || typeof emailLike !== "string") return null;
+    const at = emailLike.indexOf("@");
+    return at > 0 ? emailLike.slice(0, at) : emailLike;
+};
+
+const resolveActor = (...candidates) => {
+    for (const c of candidates) {
+        if (c && typeof c === "string" && c.trim()) return c.trim();
+    }
+    return null;
+};
+
 const renderMessage = (n) => {
     const p = n.payload || {};
-    const from   = p.from_email          || "Someone";
-    const title  = p.event_title         || "an event";
-    const target = p.suggested_user_email || p.responder_email || "someone";
+    // Sender (quien dispara la notificación)
+    const from =
+        resolveActor(
+            p.from_username,
+            p.sender_username,
+            // Bridge para payloads legacy:
+            localPartOf(p.from_email),
+            localPartOf(p.sender_email),
+        ) || "A user";
+
+    const title  = p.event_title || "an event";
+
+    // Target / persona afectada (suggested user, responder)
+    const target =
+        resolveActor(
+            p.suggested_username,
+            p.responder_username,
+            // Bridge para payloads legacy:
+            localPartOf(p.suggested_user_email),
+            localPartOf(p.responder_email),
+        ) || "another user";
 
     switch (n.type) {
         case "friend_request": {

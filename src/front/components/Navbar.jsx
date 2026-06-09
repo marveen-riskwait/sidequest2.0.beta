@@ -475,13 +475,15 @@ const NAVBAR_CSS = `
 // =====================================================
 const getChatLabel = (room, currentUserId) => {
     if (room?.type === "event") {
-        return room.event_title || "Chat de evento";
+        return room.event_title || "Event chat";
     }
     if (room?.type === "dm") {
         const p = room.dm_partner;
-        if (p) return p.username || p.email || "Chat";
+        // RGPD: el label del DM es el @username del partner. NUNCA
+        // su email, aunque el partner sea anónimo (cambió username).
+        if (p) return p.username ? `@${p.username}` : "Chat";
         const other = room?.participants?.find((u) => u.id !== currentUserId);
-        return other?.email || "Chat";
+        return other?.username ? `@${other.username}` : "Chat";
     }
     return room?.event_title || "Chat";
 };
@@ -555,12 +557,35 @@ export const Navbar = () => {
     const audioChunksRef = useRef([]);
 
     // =====================================================
-    // REDIRECT
+    // REDIRECT — usuarios no logueados solo pueden estar en
+    // un conjunto cerrado de rutas públicas. Cualquier otra
+    // ruta los manda a /login.
+    //
+    // RGPD / SEO: las páginas legales (/terms /privacy /legal)
+    // DEBEN ser accesibles sin estar logueado:
+    //   - Obligación legal (LCEN, LSSI, RGPD): los términos y la
+    //     política de privacidad son condición previa para que
+    //     el usuario pueda dar consentimiento al registrarse.
+    //     No puede aceptarlos sin haberlos podido leer antes.
+    //   - Crawlers (Google, etc.) no aceptan login para indexar.
+    //   - Linkeo externo: si alguien comparte el link a tus Terms,
+    //     debe abrirse, no rebotar a login.
+    //
+    // /demo y /single/:id las dejamos públicas también porque
+    // son demo pages del template original.
     // =====================================================
     useEffect(() => {
         if (!isLogged) {
             const path = location.pathname;
-            if (path !== "/login" && path !== "/register") {
+            const isPublic =
+                path === "/login" ||
+                path === "/register" ||
+                path === "/terms" ||
+                path === "/privacy" ||
+                path === "/legal" ||
+                path === "/demo" ||
+                path.startsWith("/single/");
+            if (!isPublic) {
                 navigate("/login", { replace: true });
             }
         }
@@ -971,14 +996,37 @@ export const Navbar = () => {
 
                                     <Dropdown.Menu className="sq-menu-dropdown">
                                         <Dropdown.Header>
+                                            {/* RGPD: si por alguna razón no hay
+                                                username (no debería pasar, es
+                                                obligatorio en registro), caemos
+                                                a un guión genérico — JAMÁS al
+                                                email. */}
                                             Hi {cachedUser?.username
                                                 ? `@${cachedUser.username}`
-                                                : (cachedUser?.email || "—")}
+                                                : "—"}
                                         </Dropdown.Header>
                                         <Dropdown.Divider />
 
                                         <Dropdown.Item as={Link} to="/friends">
                                             <FiUsers className="me-2" /> Friends
+                                        </Dropdown.Item>
+
+                                        <Dropdown.Divider />
+
+                                        {/* SUBMENÚ LEGAL — siempre accesible
+                                            desde el hamburger menu, incluso en
+                                            páginas fullscreen (mapa) donde el
+                                            SiteFooter no se renderiza. Obligatorio
+                                            por RGPD/LCEN/LSSI. */}
+                                        <Dropdown.Header>Legal</Dropdown.Header>
+                                        <Dropdown.Item as={Link} to="/terms">
+                                            Terms of Service
+                                        </Dropdown.Item>
+                                        <Dropdown.Item as={Link} to="/privacy">
+                                            Privacy Policy
+                                        </Dropdown.Item>
+                                        <Dropdown.Item as={Link} to="/legal">
+                                            Legal Notice
                                         </Dropdown.Item>
 
                                         <Dropdown.Divider />
@@ -1360,7 +1408,9 @@ const RoomCard = ({ room, currentUserId, onClick }) => {
 
 const FriendCard = ({ friend, onOpen, onStartDm }) => {
     const u = friend.user;
-    const label = u.username || u.email;
+    // RGPD: si no hay username, mostramos un placeholder genérico
+    // antes que filtrar el email a la UI.
+    const label = u.username ? `@${u.username}` : "(no username)";
     const room = friend.room;
 
     const handleClick = () => {

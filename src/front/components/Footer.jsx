@@ -155,7 +155,8 @@ const initials = (user) => {
 	const f = (user.first_name || "").trim().charAt(0);
 	const l = (user.last_name || "").trim().charAt(0);
 	if (f || l) return `${f}${l}`.toUpperCase();
-	return (user.email || "?").charAt(0).toUpperCase();
+	// RGPD: fallback al primer char del username, NUNCA del email.
+	return (user.username || "?").charAt(0).toUpperCase();
 };
 
 const levelColor = (level) => {
@@ -400,9 +401,19 @@ export const Footer = () => {
 										{initials(profile)}
 									</div>
 								)}
-								<div className="text-secondary small mt-2">
-									{profile.email}
-								</div>
+								{/* RGPD: nunca mostramos email. Si el usuario
+								    tiene username, lo mostramos como @username;
+								    si tiene nombre, lo mostramos también. */}
+								{profile.username && (
+									<div className="text-secondary small mt-2">
+										@{profile.username}
+									</div>
+								)}
+								{(profile.first_name || profile.last_name) && (
+									<div className="text-light small">
+										{[profile.first_name, profile.last_name].filter(Boolean).join(" ")}
+									</div>
+								)}
 							</div>
 
 							{/* STATS */}

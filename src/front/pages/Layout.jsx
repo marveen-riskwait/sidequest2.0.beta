@@ -3,6 +3,7 @@ import ScrollToTop from "../components/ScrollToTop";
 import { Navbar } from "../components/Navbar";
 import { Footer } from "../components/Footer";
 import { BottomNavbar } from "../components/ButtonNavbar";
+import { SiteFooter } from "../components/SiteFooter";
 
 // Base component that maintains the navbar and footer throughout the page
 // and the scroll-to-top functionality.
@@ -30,6 +31,18 @@ export const Layout = () => {
             <main id="main-content" role="main">
                 <Outlet />
             </main>
+            {/* SiteFooter: enlaces legales (Terms / Privacy / Legal Notice)
+                + copyright. Aparece en todas las páginas EXCEPTO:
+                  - "/"      → landing tiene su propio lp-footer
+                  - "/app"   → mapa fullscreen, no scrollea
+                  - "/map"   → idem
+                  - "/login", "/register" → auth screens fullscreen
+                El propio componente decide ocultarse en esas rutas via
+                HIDE_ON_PATHS, así que aquí lo montamos siempre.
+                Los enlaces legales SIEMPRE son accesibles desde el
+                hamburger menu del Navbar incluso cuando el footer no
+                se renderiza (mapa).                                       */}
+            <SiteFooter />
             {!hideNav && <BottomNavbar />}
         </ScrollToTop>
     );

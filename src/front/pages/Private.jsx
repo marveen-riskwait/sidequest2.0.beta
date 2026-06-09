@@ -18,7 +18,9 @@ export const Private = () => {
 
 			<h1>Private Page</h1>
 
-			<h3>Welcome {user?.email}</h3>
+			{/* RGPD: nunca mostramos el email. Usamos username
+			    (siempre obligatorio en registro). */}
+			<h3>Welcome @{user?.username || "user"}</h3>
 
 			<p>You are logged in.</p>
 
