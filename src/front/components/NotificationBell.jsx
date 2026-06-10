@@ -1,5 +1,5 @@
 // src/front/components/NotificationBell.jsx
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import Dropdown from "react-bootstrap/Dropdown";
 import Button from "react-bootstrap/Button";
@@ -498,6 +498,19 @@ export const NotificationBell = () => {
     // doesn't get reset every time useNotifications refetches.
     const [showAll, setShowAll] = useState(false);
 
+    // Set de notif-ids actualmente en proceso. Evita que un usuario
+    // que pulsa rápido un botón de RSVP (going/maybe/not_going) o
+    // de aceptar/refusar request mande N requests al backend antes
+    // de que llegue la primera respuesta. Es un ref (no state)
+    // porque no necesitamos re-render — solo bloquear duplicados.
+    const inFlightRef = useRef(new Set());
+    const guardInFlight = async (notifId, fn) => {
+        if (inFlightRef.current.has(notifId)) return; // ya en proceso
+        inFlightRef.current.add(notifId);
+        try { await fn(); }
+        finally { inFlightRef.current.delete(notifId); }
+    };
+
     // ----- friend_request -----
     // Action handlers MARK the notif as read (not delete) so the user can
     // still scroll back and see "I accepted X's request yesterday". The
@@ -525,19 +538,20 @@ export const NotificationBell = () => {
     };
 
     // ----- event_invite / event_public (3 buttons via /respond) -----
-    const respondEvent = async (n, response) => {
-        const eid = (n.payload || {}).event_id;
-        if (!eid) return;
-        const res = await fetchWithRetry(
-            `${API_URL}/api/events/${eid}/respond`,
-            {
-                method: "PUT",
-                headers: authHeaders(),
-                body: JSON.stringify({ response }),
-            }
-        );
-        if (res.ok) { markAsRead(n.id); fetchNotifications(); }
-    };
+    const respondEvent = (n, response) =>
+        guardInFlight(`evt-${n.id}-${response}`, async () => {
+            const eid = (n.payload || {}).event_id;
+            if (!eid) return;
+            const res = await fetchWithRetry(
+                `${API_URL}/api/events/${eid}/respond`,
+                {
+                    method: "PUT",
+                    headers: authHeaders(),
+                    body: JSON.stringify({ response }),
+                }
+            );
+            if (res.ok) { markAsRead(n.id); fetchNotifications(); }
+        });
 
     // ----- invite_suggestion (creator-only actions) -----
     const approveSuggestion = async (n) => {

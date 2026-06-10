@@ -1040,6 +1040,13 @@ export const EventModal = ({
   // Unified response (going/maybe/not_going). Works for invitees and participants.
   const handleRespond = async (response) => {
     if (respondBusy || !eventId) return;
+    // IDEMPOTENCIA cliente: si el usuario clica la misma opción que
+    // ya tiene activa, no llamamos al backend (evita notifs
+    // duplicadas al creador). Excepción: invitación pendiente —
+    // ahí cualquier click marca la transición.
+    const currentRsvp = eventData?.my_rsvp;
+    const isPending = eventData?.my_status === "pending";
+    if (!isPending && currentRsvp === response) return;
     setRespondBusy(true);
     try {
       const data = await apiRespond(eventId, response);

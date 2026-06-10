@@ -208,6 +208,14 @@ const ResponseBar = ({ eventId, myStatus, initialRsvp, onChanged }) => {
   const handleClick = async (e, value) => {
     e.stopPropagation();
     if (saving) return;
+    // IDEMPOTENCIA cliente: si el usuario clica la opción que ya
+    // tiene activa, NO llamamos al backend. Backend también tiene
+    // la check (defense in depth), pero evitamos round-trip + spam
+    // de logs + cualquier race condition. Solo aplica si NO es una
+    // invitación pendiente — en ese caso aceptar "going" SÍ debe
+    // disparar la transición invitación→participante aunque el
+    // "rsvp" técnicamente coincida.
+    if (rsvp === value && myStatus !== "pending") return;
     setSaving(true);
     try {
       const data = await apiRespond(eventId, value);

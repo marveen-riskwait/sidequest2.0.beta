@@ -825,15 +825,31 @@ def respond_event(event_id):
         }), 200
 
     if is_participant:
+        # IDEMPOTENCIA: leer el rsvp ANTES de actualizar para detectar
+        # si el usuario realmente está cambiando su respuesta o si solo
+        # hizo click varias veces en la misma. Sin este check, cada
+        # click — aunque sea sobre la opción ya activa — genera una
+        # notificación nueva para el creador (spam).
+        previous_row = db.session.execute(
+            text(
+                "SELECT rsvp FROM event_participants "
+                "WHERE event_id = :eid AND user_id = :uid"),
+            {"eid": event_id, "uid": current_user_id},
+        ).first()
+        previous_rsvp = previous_row[0] if previous_row else None
+
         db.session.execute(
             text(
                 "UPDATE event_participants SET rsvp = :r WHERE event_id = :eid AND user_id = :uid"),
             {"r": response, "eid": event_id, "uid": current_user_id},
         )
-        _notify_rsvp_changed(event, responder, response)
+        # Solo notificamos al creador si el valor cambió REALMENTE.
+        # Mismo click → mismo valor → sin notif duplicada.
+        if previous_rsvp != response:
+            _notify_rsvp_changed(event, responder, response)
         db.session.commit()
         return jsonify({
-            "msg": "RSVP updated",
+            "msg": "RSVP updated" if previous_rsvp != response else "RSVP unchanged",
             "event": event.serialize(current_user_id=current_user_id),
         }), 200
 
@@ -857,15 +873,26 @@ def rsvp_event(event_id):
     if rsvp not in ("going", "maybe", "not_going"):
         return jsonify({"msg": "rsvp must be one of: going, maybe, not_going"}), 400
 
+    # IDEMPOTENCIA: mismo patrón que respond_event — sin esto, click
+    # repetido en el mismo botón crea N notifs duplicadas.
+    previous_row = db.session.execute(
+        text(
+            "SELECT rsvp FROM event_participants "
+            "WHERE event_id = :eid AND user_id = :uid"),
+        {"eid": event_id, "uid": current_user_id},
+    ).first()
+    previous_rsvp = previous_row[0] if previous_row else None
+
     db.session.execute(
         text("UPDATE event_participants SET rsvp = :r WHERE event_id = :eid AND user_id = :uid"),
         {"r": rsvp, "eid": event_id, "uid": current_user_id},
     )
     responder = db.session.get(User, current_user_id)
-    _notify_rsvp_changed(event, responder, rsvp)
+    if previous_rsvp != rsvp:
+        _notify_rsvp_changed(event, responder, rsvp)
     db.session.commit()
     return jsonify({
-        "msg": "RSVP updated",
+        "msg": "RSVP updated" if previous_rsvp != rsvp else "RSVP unchanged",
         "event": event.serialize(current_user_id=current_user_id),
     }), 200
 

@@ -124,6 +124,13 @@ export const Calendar = ({ embedded = false } = {}) => {
   const handleRespond = async (eventId, value, evt) => {
     evt?.stopPropagation();
     if (busyEventId) return;
+    // IDEMPOTENCIA cliente: si el usuario clica la opción que ya
+    // tiene activa, NO llamamos al backend (evita notifs duplicadas
+    // al creador). Excepción: invitación pendiente — ahí el click
+    // SÍ debe ejecutarse para marcar la transición pendiente→activo.
+    const current = events.find((e) => e.id === eventId);
+    const isPending = current?.my_status === "pending";
+    if (!isPending && current?.my_rsvp === value) return;
     setBusyEventId(eventId);
     try {
       const data = await apiRespond(eventId, value);
