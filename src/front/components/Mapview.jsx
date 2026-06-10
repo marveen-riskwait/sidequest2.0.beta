@@ -15,6 +15,21 @@ import "./mapview.css";
 // rules don't run inline), so we inject it once via a <style> tag at the
 // top of the rendered tree. Everything else about the marker is inline
 // inside createMarkerAvatar to avoid cascade fights.
+//
+// COMPORTAMIENTO POR DISPOSITIVO:
+//   Desktop (hover disponible):
+//     - hover sobre marker → tooltip visible
+//     - click sobre marker → abre modal directo
+//   Touch (móvil/tablet — sin hover):
+//     - el :hover CSS no se aplica (lo silenciamos abajo)
+//     - 1er tap sobre marker → JS añade .peeked al wrapper → tooltip
+//       visible (mismo efecto que hover en desktop)
+//     - 2º tap sobre el MISMO marker → abre modal de detalle
+//     - tap en mapa → quita .peeked (reset peek)
+//
+// La clase `.peeked` la añade/quita Mapview vía useEffect cuando
+// cambia el estado `peekedMarkerId`. Se busca el wrapper por
+// data-event-id (inyectado por createMarkerAvatar).
 const MARKER_HOVER_CSS = `
 .sq-marker-icon { background: transparent !important; border: 0 !important; }
 .sq-marker-wrapper:hover .sq-marker-tip-floater {
@@ -22,9 +37,35 @@ const MARKER_HOVER_CSS = `
   transform: translateX(-50%) translateY(-2px) !important;
 }
 @media (hover: none) {
+  /* En táctil silenciamos el :hover (Safari/iOS lo dispara
+     fantasmagóricamente tras el tap) y dejamos que el JS gestione
+     la visibilidad vía .peeked, que es estable y predecible. */
   .sq-marker-wrapper:hover .sq-marker-tip-floater { opacity: 0 !important; }
+  .sq-marker-wrapper.peeked .sq-marker-tip-floater {
+    opacity: 1 !important;
+    transform: translateX(-50%) translateY(-2px) !important;
+  }
 }
 `;
+
+// Detecta si el dispositivo NO tiene capacidad de hover (móvil/tablet).
+// Calculada on-demand para soportar tablets que cambian de modo y
+// usuarios que rotan / conectan ratón externo.
+const isTouchDevice = () =>
+  typeof window !== "undefined" &&
+  typeof window.matchMedia === "function" &&
+  window.matchMedia("(hover: none)").matches;
+
+// Selectores que indican que hay un overlay de Bootstrap abierto.
+// Usado para suprimir el map-click cuando el usuario hace clic en el
+// mapa para cerrar uno de estos overlays — sin el supress, el click
+// llegaría a Leaflet y abriría el modal de "crear evento".
+const OVERLAY_OPEN_SELECTOR =
+  ".modal.show, .dropdown-menu.show, .offcanvas.show";
+const hasOpenOverlay = () =>
+  typeof document !== "undefined" &&
+  (document.body.classList.contains("modal-open") ||
+    !!document.querySelector(OVERLAY_OPEN_SELECTOR));
 
 const MADRID = [40.4168, -3.7038];
 const computeCenter = (userCenter) => userCenter || MADRID;
@@ -147,6 +188,24 @@ export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
   const [modalOpen, setModalOpen] = useState(false);
   const [activeEventId, setActiveEventId] = useState(null);
   const [prefillCoords, setPrefillCoords] = useState(null);
+
+  // ── UX two-tap (touch devices) ─────────────────────────────
+  // Cuando el dispositivo NO tiene hover, el primer tap en un
+  // marker NO abre el modal, solo "peek" (tooltip visible).
+  // El segundo tap sobre el MISMO marker abre el modal. Tap en
+  // mapa o en otro marker resetea/cambia el peek.
+  const [peekedMarkerId, setPeekedMarkerId] = useState(null);
+
+  // ── Suppress map-click cuando había overlay abierto ───────
+  // Si el usuario tiene un dropdown/modal/menú abierto y hace
+  // click en el mapa para cerrarlo, NO queremos que ese click
+  // también abra el modal de "crear evento". El click se usa
+  // SOLO para cerrar el overlay.
+  //
+  // Captura el estado en mousedown (capture phase) — eso ocurre
+  // ANTES de que Bootstrap procese el click y cierre el overlay,
+  // así el ref refleja "había overlay abierto al iniciar el tap".
+  const overlayWasOpenRef = useRef(false);
 
   const mapRef = useRef(null);
 
@@ -337,6 +396,44 @@ export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
     if (followUserRef.current) setFollowUser(false);
   };
 
+  // ── EFFECT: capturar si había overlay abierto al mousedown ──
+  // Capture-phase listener: fire ANTES de que Bootstrap procese
+  // el click y haga `.hide()` del dropdown/modal. Esto garantiza
+  // que `overlayWasOpenRef.current` refleja el estado REAL al
+  // inicio del tap del usuario, no el resultante.
+  // Cubrimos mousedown (escritorio) + touchstart (móvil).
+  useEffect(() => {
+    const capture = () => {
+      overlayWasOpenRef.current = hasOpenOverlay();
+    };
+    document.addEventListener("mousedown", capture, true);   // capture phase
+    document.addEventListener("touchstart", capture, true);
+    return () => {
+      document.removeEventListener("mousedown", capture, true);
+      document.removeEventListener("touchstart", capture, true);
+    };
+  }, []);
+
+  // ── EFFECT: aplicar/quitar la clase .peeked al marker DOM ──
+  // Cuando cambia `peekedMarkerId`, busca el marker correspondiente
+  // por su data-event-id (atributo inyectado por createMarkerAvatar)
+  // y le pone/quita la clase .peeked. La CSS de MARKER_HOVER_CSS
+  // hace que esa clase vuelva el tooltip visible en touch devices.
+  //
+  // Limpia el peeked anterior antes de aplicar el nuevo, por si el
+  // usuario tap-eó otro marker (cambiamos foco sin pasar por null).
+  useEffect(() => {
+    // Clear all current .peeked first (defensivo)
+    document.querySelectorAll(".sq-marker-wrapper.peeked")
+      .forEach((el) => el.classList.remove("peeked"));
+    if (peekedMarkerId != null) {
+      const el = document.querySelector(
+        `.sq-marker-wrapper[data-event-id="${peekedMarkerId}"]`
+      );
+      if (el) el.classList.add("peeked");
+    }
+  }, [peekedMarkerId, visibleEvents]); // visibleEvents → re-aplica si los markers se re-pintan
+
   const recenterOnUser = () => {
     if (!mapRef.current) return;
 
@@ -398,6 +495,19 @@ export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
   };
 
   const handleMapClick = (coords) => {
+    // ── SUPPRESS: si había un overlay abierto al iniciar el tap
+    //   (hamburger menu, notificaciones, modal de chat, dropdown
+    //    de filtros, etc.), este click se usa SOLO para cerrarlo.
+    //   No abrimos el modal de crear evento. Consumimos el flag.
+    if (overlayWasOpenRef.current) {
+      overlayWasOpenRef.current = false;
+      return;
+    }
+    // También limpiamos cualquier marker "peeked" — si el usuario
+    // tocó un marker (tooltip visible) y ahora toca fuera, quiere
+    // salir de ese estado.
+    if (peekedMarkerId != null) setPeekedMarkerId(null);
+
     setActiveEventId(null);
     setPrefillCoords(coords);
     setModalOpen(true);
@@ -405,6 +515,22 @@ export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
   };
 
   const handleMarkerClick = (event) => {
+    // ── TWO-TAP en touch devices ──
+    // 1er tap → solo "peek" (tooltip visible).
+    // 2º tap sobre el MISMO marker → abre modal.
+    // Desktop (con hover) → siempre abre modal directamente (el
+    // hover ya da el tooltip, no hace falta peek).
+    if (isTouchDevice()) {
+      const alreadyPeeked = peekedMarkerId === event.id;
+      if (!alreadyPeeked) {
+        setPeekedMarkerId(event.id);
+        onMarkerClick && onMarkerClick(event);
+        return;  // ← no abrimos modal todavía
+      }
+      // 2º tap: limpiamos el peek y caemos al flujo normal.
+      setPeekedMarkerId(null);
+    }
+
     setActiveEventId(event.id);
     setPrefillCoords(null);
     setModalOpen(true);

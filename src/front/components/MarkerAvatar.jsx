@@ -128,8 +128,18 @@ export const createMarkerAvatar = (event, size = 56, goingCount = 0, tooltipText
     ? `<img src="${escapeHTML(imageUrl)}" alt="" loading="lazy" style="${imgStyle}" onerror="this.style.display='none';this.parentElement.innerHTML='${letter}';"/>`
     : `<span>${letter}</span>`;
 
+  // data-event-id permite a Mapview encontrar este marker por id
+  // desde fuera (querySelector) sin tocar la API de react-leaflet.
+  // Lo usa la lógica de "two-tap to open" en móvil para añadir/quitar
+  // la clase `.peeked` que hace visible el tooltip tras el primer tap.
+  // event.id es un int del backend → coercionamos a string + escapamos
+  // defensivamente.
+  const eventIdAttr = typeof event === "object" && event?.id != null
+    ? ` data-event-id="${escapeHTML(String(event.id))}"`
+    : "";
+
   const html =
-    `<div class="sq-marker-wrapper" style="${wrapStyle}">` +
+    `<div class="sq-marker-wrapper" style="${wrapStyle}"${eventIdAttr}>` +
       `<div style="${circleStyle}">${inner}</div>` +
       (goingCount > 0
         ? `<span style="${countStyle}">${goingCount > 99 ? "99+" : goingCount} going</span>`
