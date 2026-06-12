@@ -52,7 +52,7 @@ export const useNotifications = ({ poll = false } = {}) => {
         const res = await fetchWithRetry(`${API_URL}/api/notifications`, {
             headers: authHeaders(),
         });
-        if (!res.ok) return;
+        if (!res?.ok) return;
         const data = await res.json();
         dispatch({ type: "set_notifications", payload: data });
     };
@@ -62,7 +62,7 @@ export const useNotifications = ({ poll = false } = {}) => {
         const res = await fetchWithRetry(`${API_URL}/api/notifications/unread-count`, {
             headers: authHeaders(),
         });
-        if (!res.ok) return;
+        if (!res?.ok) return;
         const data = await res.json();
         dispatch({ type: "set_unread_notifs_count", payload: data.unread_count });
     };
@@ -72,7 +72,7 @@ export const useNotifications = ({ poll = false } = {}) => {
             method: "PUT",
             headers: authHeaders(),
         });
-        if (res.ok) dispatch({ type: "mark_notification_read", payload: id });
+        if (res?.ok) dispatch({ type: "mark_notification_read", payload: id });
     };
 
     const markAllRead = async () => {
@@ -80,7 +80,7 @@ export const useNotifications = ({ poll = false } = {}) => {
             method: "PUT",
             headers: authHeaders(),
         });
-        if (res.ok) dispatch({ type: "mark_all_notifications_read" });
+        if (res?.ok) dispatch({ type: "mark_all_notifications_read" });
     };
 
     const deleteNotification = async (id) => {
@@ -88,7 +88,7 @@ export const useNotifications = ({ poll = false } = {}) => {
             method: "DELETE",
             headers: authHeaders(),
         });
-        if (res.ok) dispatch({ type: "remove_notification", payload: id });
+        if (res?.ok) dispatch({ type: "remove_notification", payload: id });
     };
 
     // Optional polling — opt-in via { poll: true }. Used by NotificationBell so

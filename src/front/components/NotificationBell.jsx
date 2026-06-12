@@ -35,16 +35,25 @@ import { useNotifications } from "../hooks/useNotifications.jsx";
 
 const API_URL = import.meta.env.VITE_BACKEND_URL;
 
+// Tanda 7D — la autenticación viaja en la cookie httpOnly + X-CSRF-TOKEN,
+// añadidos por el parche global de fetch (services/auth.js).
 const authHeaders = () => ({
     "Content-Type": "application/json",
-    Authorization: `Bearer ${localStorage.getItem("token")}`,
 });
 
+// Tanda 7H — Retry SOLO para GET y con tope (antes: bucle infinito para
+// cualquier método — un PUT de accept/RSVP reintentado podía ejecutar la
+// acción dos veces, y con el backend caído quedaban bucles zombi).
+// Devuelve null si la red falla — los callers chequean `res?.ok`.
+const MAX_GET_RETRIES = 3;
 const fetchWithRetry = async (url, opts = {}) => {
+    const method = (opts.method || "GET").toUpperCase();
+    const maxRetries = method === "GET" ? MAX_GET_RETRIES : 0;
     let delay = 400;
-    for (;;) {
+    for (let attempt = 0; ; attempt++) {
         try { return await fetch(url, opts); }
         catch (_) {
+            if (attempt >= maxRetries) return null;
             await new Promise((r) => setTimeout(r, delay));
             delay = Math.min(delay * 2, 4000);
         }
@@ -547,7 +556,7 @@ export const NotificationBell = () => {
             `${API_URL}/api/friends/requests/${fid}/accept`,
             { method: "PUT", headers: authHeaders() }
         );
-        if (res.ok) { markAsRead(n.id); fetchNotifications(); }
+        if (res?.ok) { markAsRead(n.id); fetchNotifications(); }
     };
 
     const refuseFriend = async (n) => {
@@ -557,7 +566,7 @@ export const NotificationBell = () => {
             `${API_URL}/api/friends/requests/${fid}/refuse`,
             { method: "PUT", headers: authHeaders() }
         );
-        if (res.ok) { markAsRead(n.id); fetchNotifications(); }
+        if (res?.ok) { markAsRead(n.id); fetchNotifications(); }
     };
 
     // ----- event_invite / event_public (3 buttons via /respond) -----
@@ -573,7 +582,7 @@ export const NotificationBell = () => {
                     body: JSON.stringify({ response }),
                 }
             );
-            if (res.ok) { markAsRead(n.id); fetchNotifications(); }
+            if (res?.ok) { markAsRead(n.id); fetchNotifications(); }
         });
 
     // ----- invite_suggestion (creator-only actions) -----
@@ -584,7 +593,7 @@ export const NotificationBell = () => {
             `${API_URL}/api/events/${p.event_id}/suggestions/${p.suggestion_id}/approve`,
             { method: "PUT", headers: authHeaders() }
         );
-        if (res.ok) { markAsRead(n.id); fetchNotifications(); }
+        if (res?.ok) { markAsRead(n.id); fetchNotifications(); }
     };
 
     const refuseSuggestion = async (n) => {
@@ -594,7 +603,7 @@ export const NotificationBell = () => {
             `${API_URL}/api/events/${p.event_id}/suggestions/${p.suggestion_id}/refuse`,
             { method: "PUT", headers: authHeaders() }
         );
-        if (res.ok) { markAsRead(n.id); fetchNotifications(); }
+        if (res?.ok) { markAsRead(n.id); fetchNotifications(); }
     };
 
     // ----- event_confirmation (creator answers "did it happen?") -----
@@ -612,7 +621,7 @@ export const NotificationBell = () => {
                     body: JSON.stringify({ happened }),
                 }
             );
-            if (res.ok) { fetchNotifications(); }
+            if (res?.ok) { fetchNotifications(); }
         });
 
     // Click anywhere on the row → mark read + navigate (per-type target).

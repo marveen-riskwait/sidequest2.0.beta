@@ -100,13 +100,25 @@ const authHeaders = () => ({
     "Content-Type": "application/json",
 });
 
+// Tanda 7H — Retry SOLO para GET y con tope (antes: bucle infinito para
+// CUALQUIER método). Dos peligros del comportamiento viejo:
+//   - mutaciones reintentadas: si el POST de un mensaje llega al server
+//     pero la respuesta se pierde en la red, el bucle reenviaba →
+//     mensaje DUPLICADO. Ahora POST/PUT/DELETE hacen UN solo intento.
+//   - bucles zombi: con el backend caído, cada llamada quedaba
+//     reintentando para siempre (incluso tras desmontar el componente).
+// Devuelve null cuando el intento (o los reintentos) fallan por red —
+// los callers chequean `res?.ok` y conservan su último estado bueno.
+const MAX_GET_RETRIES = 3;
 const fetchWithRetry = async (url, options = {}) => {
+    const method = (options.method || "GET").toUpperCase();
+    const maxRetries = method === "GET" ? MAX_GET_RETRIES : 0;
     let delay = 400;
-    for (;;) {
+    for (let attempt = 0; ; attempt++) {
         try {
-            const res = await fetch(url, options);
-            return res;
+            return await fetch(url, options);
         } catch (_) {
+            if (attempt >= maxRetries) return null;
             await new Promise((r) => setTimeout(r, delay));
             delay = Math.min(delay * 2, 4000);
         }
@@ -115,7 +127,9 @@ const fetchWithRetry = async (url, options = {}) => {
 
 const getChatRooms = async (dispatch) => {
     const res = await fetchWithRetry(`${API}/api/chat/rooms`, { headers: authHeaders() });
-    if (!res.ok) return;
+    // Fallo de red / backend caído → conservamos el store tal cual
+    // (nada de vaciar listas por un blip transitorio).
+    if (!res?.ok) return;
     const rooms = await res.json();
     dispatch({ type: "set_chat_rooms", payload: rooms });
 };
@@ -124,7 +138,9 @@ const getRoomMessages = async (roomId) => {
     const res = await fetchWithRetry(`${API}/api/chat/rooms/${roomId}/messages`, {
         headers: authHeaders(),
     });
-    if (!res.ok) return { messages: [] };
+    // Tanda 7H — null (no {messages: []}): los callers distinguen "no
+    // pude cargar" (conservan el hilo visible) de "hilo vacío real".
+    if (!res?.ok) return null;
     return res.json();
 };
 
@@ -134,8 +150,8 @@ const sendRoomMessage = async (roomId, payload) => {
         headers: authHeaders(),
         body: JSON.stringify(payload),
     });
-    if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
+    if (!res?.ok) {
+        const data = res ? await res.json().catch(() => ({})) : {};
         throw new Error(data.msg || "Failed to send message");
     }
     return res.json();
@@ -150,8 +166,8 @@ const editRoomMessage = async (roomId, msgId, newText) => {
             body: JSON.stringify({ text: newText }),
         }
     );
-    if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
+    if (!res?.ok) {
+        const data = res ? await res.json().catch(() => ({})) : {};
         throw new Error(data.msg || "Failed to edit message");
     }
     return res.json();
@@ -173,7 +189,7 @@ const searchChats = async (q) => {
         `${API}/api/chat/search?q=${encodeURIComponent(q)}`,
         { headers: authHeaders() }
     );
-    if (!res.ok) return { event_rooms: [], friends: [] };
+    if (!res?.ok) return { event_rooms: [], friends: [] };
     return res.json();
 };
 
@@ -183,8 +199,8 @@ const createOrGetDm = async (userId) => {
         headers: authHeaders(),
         body: JSON.stringify({ user_id: userId }),
     });
-    if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
+    if (!res?.ok) {
+        const data = res ? await res.json().catch(() => ({})) : {};
         throw new Error(data.msg || "Failed to start DM");
     }
     return res.json();
@@ -294,6 +310,18 @@ const NAVBAR_CSS = `
   margin-left: 0.4rem;
   flex-shrink: 0;
 }
+
+/* Tanda 7E — Lista de chats con scroll interno: a partir de ~5
+   conversaciones (cada carta ≈ 82px) el modal deja de crecer; el
+   resto se alcanza scrolleando DENTRO de la lista. Barra de scroll
+   oculta (Firefox + WebKit) para mantener el look limpio del modal. */
+.sq-chat-rooms-scroll {
+  max-height: min(420px, 55vh);
+  overflow-y: auto;
+  scrollbar-width: none;          /* Firefox */
+  -ms-overflow-style: none;       /* IE/Edge legacy */
+}
+.sq-chat-rooms-scroll::-webkit-scrollbar { display: none; }  /* WebKit */
 
 /* Search */
 .sq-chat-search-input {
@@ -600,6 +628,9 @@ export const Navbar = () => {
                 path === "/privacy" ||
                 path === "/legal" ||
                 path === "/demo" ||
+                // Tanda 7E/7H — el link de reset llega por email SIN
+                // sesión (token en query string → path exacto).
+                path.startsWith("/reset-password") ||
                 path.startsWith("/single/");
             if (!isPublic) {
                 navigate("/login", { replace: true });
@@ -642,7 +673,8 @@ export const Navbar = () => {
         let cancelled = false;
         const load = async () => {
             const data = await getRoomMessages(activeRoom.id);
-            if (!cancelled) setMessages(data.messages || []);
+            // null = fallo transitorio → conservamos lo último visible.
+            if (!cancelled && data) setMessages(data.messages || []);
         };
         load();
         const t = setInterval(load, 20000);
@@ -741,7 +773,7 @@ export const Navbar = () => {
             await sendRoomMessage(activeRoom.id, { text: replyText });
             setReplyText("");
             const data = await getRoomMessages(activeRoom.id);
-            setMessages(data.messages || []);
+            if (data) setMessages(data.messages || []);
             getChatRooms(dispatch);
         } catch (e) {
             console.error("Error sending message:", e);
@@ -773,7 +805,7 @@ export const Navbar = () => {
                 media_type: "image",
             });
             const data = await getRoomMessages(activeRoom.id);
-            setMessages(data.messages || []);
+            if (data) setMessages(data.messages || []);
             getChatRooms(dispatch);
         } catch (err) {
             console.error("Error sending image:", err);
@@ -813,7 +845,7 @@ export const Navbar = () => {
                         media_type: "audio",
                     });
                     const data = await getRoomMessages(activeRoom.id);
-                    setMessages(data.messages || []);
+                    if (data) setMessages(data.messages || []);
                     getChatRooms(dispatch);
                 } catch (err) {
                     console.error("Error sending audio:", err);
@@ -862,7 +894,7 @@ export const Navbar = () => {
             await editRoomMessage(activeRoom.id, editingMsgId, trimmed);
             cancelEdit();
             const data = await getRoomMessages(activeRoom.id);
-            setMessages(data.messages || []);
+            if (data) setMessages(data.messages || []);
             getChatRooms(dispatch);
         } catch (e) {
             console.error("Error editing message:", e);
@@ -1234,16 +1266,21 @@ export const Navbar = () => {
                                             You have no active chats. Create/join an event or search for a friend to get started.
                                         </p>
                                     ) : (
-                                        <ListGroup variant="flush">
-                                            {store.chatRooms.map((room) => (
-                                                <RoomCard
-                                                    key={room.id}
-                                                    room={room}
-                                                    currentUserId={currentUserId}
-                                                    onClick={() => openRoom(room)}
-                                                />
-                                            ))}
-                                        </ListGroup>
+                                        /* Tanda 7E — scroll interno (barra oculta) a
+                                           partir de ~5 chats para que el modal no
+                                           crezca sin límite. */
+                                        <div className="sq-chat-rooms-scroll">
+                                            <ListGroup variant="flush">
+                                                {store.chatRooms.map((room) => (
+                                                    <RoomCard
+                                                        key={room.id}
+                                                        room={room}
+                                                        currentUserId={currentUserId}
+                                                        onClick={() => openRoom(room)}
+                                                    />
+                                                ))}
+                                            </ListGroup>
+                                        </div>
                                     )}
                                 </>
                             )}

@@ -40,6 +40,9 @@ import {
   FiMaximize2,
 } from "react-icons/fi";
 
+// Tanda 7H — tiempo real para el chat de la pestaña (ping chat:message).
+import { getSocket } from "../services/socket";
+
 // =============================================================
 // INLINE API
 // =============================================================
@@ -636,7 +639,10 @@ export const EventModal = ({
     cancelEdit();
     stopRecording(true);
 
-    apiListFriends().then(setFriends).catch(() => setFriends([]));
+    // Tanda 7H — en fallo transitorio conservamos la última lista de
+    // amigos (antes: setFriends([]) → un blip de red dejaba la pestaña
+    // de invitar "sin amigos" hasta reabrir el modal).
+    apiListFriends().then(setFriends).catch(() => {});
 
     if (isEditMode) {
       hydrate();
@@ -726,17 +732,32 @@ export const EventModal = ({
     apiMarkRoomRead(rid).catch(() => {});
   }, [tab, eventData?.chat_room_id]);
 
-  // poll chat every 4s while the chat tab is open
+  // Chat de la pestaña — Tanda 7H: era el último chat SIN tiempo real
+  // (poll de 4s incluso con la pestaña del navegador en background).
+  // Ahora escucha el ping "chat:message" del socket (filtrado por la
+  // room de este evento) y el poll baja a 20s como red de seguridad.
   useEffect(() => {
     if (!isEditMode || tab !== "chat") return;
-    const t = setInterval(async () => {
+    const load = async () => {
       try {
         const m = await apiGetMessages(eventId);
         setMessages(m.messages || []);
-      } catch (_) {}
-    }, 4000);
-    return () => clearInterval(t);
-  }, [tab, isEditMode, eventId]);
+      } catch (_) { /* transitorio: conservamos lo visible */ }
+    };
+    const t = setInterval(load, 20000);
+
+    const socket = getSocket();
+    const rid = eventData?.chat_room_id;
+    const onChatPing = (p) => {
+      if (p && rid && Number(p.room_id) === Number(rid)) load();
+    };
+    if (socket) socket.on("chat:message", onChatPing);
+
+    return () => {
+      clearInterval(t);
+      if (socket) socket.off("chat:message", onChatPing);
+    };
+  }, [tab, isEditMode, eventId, eventData?.chat_room_id]);
 
   // =====================================================
   // HANDLERS

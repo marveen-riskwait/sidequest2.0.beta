@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
 	Container,
 	Card,
@@ -83,6 +83,11 @@ export const Login = () => {
 	const navigate = useNavigate();
 	const { dispatch } = useGlobalReducer();
 
+	// Tanda 7E — el link de verificación del email redirige aquí con
+	// ?verified=1 (ok) o ?verified=0 (token inválido/caducado).
+	const [searchParams] = useSearchParams();
+	const verified = searchParams.get("verified");
+
 	const [identifier, setIdentifier] = useState("");
 	const [showReset, setShowReset] = useState(false);
 	const [password, setPassword] = useState("");
@@ -145,6 +150,18 @@ export const Login = () => {
 								style={{ filter: "brightness(0) invert(1)", height: "60px", width: "auto" }} />
 						</h2>
 						<p className="text-center text-secondary mb-4">Welcome back to your SideQuest!</p>
+
+						{/* Tanda 7E — resultado del click en el link del email */}
+						{verified === "1" && (
+							<Alert variant="success">
+								Email confirmed! You can now log in.
+							</Alert>
+						)}
+						{verified === "0" && (
+							<Alert variant="warning">
+								That verification link is invalid or has expired.
+							</Alert>
+						)}
 
 						{error && (
 							<Alert variant="danger" onClose={() => setError("")} dismissible>

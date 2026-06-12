@@ -37,6 +37,12 @@ class User(db.Model):
     birthdate:           Mapped[str] = mapped_column(String(20),  nullable=True)
     phone:               Mapped[str] = mapped_column(String(30),  nullable=True)
     created_at:          Mapped[datetime] = mapped_column(DateTime, nullable=True, default=datetime.utcnow)
+    # Tanda 7E — confirmación de email por link firmado (GET
+    # /verify-email/<token>). Los usuarios anteriores a esta tanda
+    # quedan en True via server_default en la migración; los nuevos
+    # nacen en False hasta que clican el link del correo.
+    email_verified:      Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="true")
 
     def serialize(self):
         return {
@@ -50,6 +56,7 @@ class User(db.Model):
             "profile_picture_url": self.profile_picture_url,
             "birthdate":           self.birthdate,
             "phone":               self.phone,
+            "email_verified":      bool(self.email_verified),
             "created_at":          self.created_at.isoformat() + "Z" if self.created_at else None,
         }
 

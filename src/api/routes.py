@@ -5,12 +5,15 @@ import os
 import cloudinary
 import cloudinary.uploader
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, redirect, current_app
 from flask_cors import CORS
 from flask_jwt_extended import (
     create_access_token, jwt_required, get_jwt_identity,
     set_access_cookies, unset_jwt_cookies, get_csrf_token,
 )
+# Tanda 7E — tokens firmados con caducidad para los links de email
+# (itsdangerous viene con Flask, sin dependencia nueva).
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy import text, bindparam, or_
 from api.models import (
@@ -20,6 +23,11 @@ from api.models import (
 )
 # Tanda 7F — Socket.IO: instancia global + helpers (ver api/sockets.py).
 from api.sockets import socketio, emit_to_user, allowed_origins
+# Tanda 7E — emails transaccionales (ver api/mailer.py).
+from api.mailer import (
+    mail_configured, frontend_base_url,
+    send_verification_email, send_password_reset_email,
+)
 from datetime import datetime, timedelta
 
 api = Blueprint('api', __name__)
@@ -78,6 +86,32 @@ def _configure_jwt_cookies(state):
 @api.record_once
 def _init_socketio(state):
     socketio.init_app(state.app, cors_allowed_origins=allowed_origins())
+
+
+# ── Tanda 7E — tokens de email (firmados + caducidad) ──────
+# Firmados con la misma secret del JWT; el "salt" separa los usos para
+# que un token de verificación jamás sirva para resetear contraseña.
+EMAIL_VERIFY_SALT = "sq-email-verify"
+EMAIL_VERIFY_MAX_AGE = 3 * 24 * 3600   # 3 días
+PASSWORD_RESET_SALT = "sq-password-reset"
+PASSWORD_RESET_MAX_AGE = 3600          # 1 hora
+
+
+def _email_serializer():
+    return URLSafeTimedSerializer(current_app.config["JWT_SECRET_KEY"])
+
+
+def _make_email_token(user_id, salt):
+    return _email_serializer().dumps({"uid": user_id}, salt=salt)
+
+
+def _read_email_token(token, salt, max_age):
+    """user_id o None (firma inválida / caducado / malformado)."""
+    try:
+        data = _email_serializer().loads(token, salt=salt, max_age=max_age)
+        return data.get("uid")
+    except (BadSignature, SignatureExpired, Exception):
+        return None
 
 
 # How long a sender can edit their own chat message after posting it.
@@ -359,6 +393,34 @@ def _event_is_past(event):
     return dt is not None and dt < datetime.utcnow()
 
 
+# Tanda 7F2 — "event:changed": ping en tiempo real a la AUDIENCIA de un
+# evento (creador + participantes + invitados pendientes + amigos del
+# creador si es público) cada vez que algo del evento cambia. El cliente
+# (Mapview) refetchea /events al recibirlo — el mapa de todos se
+# actualiza al instante al crear/editar/borrar/responder. Mismo patrón
+# ping→refetch que notification:new y chat:message.
+
+def _event_audience_ids(event):
+    ids = {event.creator_id}
+    ids.update(p.id for p in event.participants)
+    ids.update(inv.user_id for inv in (event.invitations or []))
+    if event.is_public:
+        ids.update(_get_friend_ids(event.creator_id))
+    return ids
+
+
+def _emit_event_ping(event_or_ids, action, event_id=None):
+    """Acepta el objeto Event o un set de user_ids precalculado (útil en
+    delete_event, donde la audiencia hay que capturarla ANTES de borrar
+    la fila). Best-effort vía emit_to_user — jamás rompe la request."""
+    if isinstance(event_or_ids, (set, frozenset, list, tuple)):
+        ids, eid = set(event_or_ids), event_id
+    else:
+        ids, eid = _event_audience_ids(event_or_ids), event_or_ids.id
+    for uid in ids:
+        emit_to_user(uid, "event:changed", {"event_id": eid, "action": action})
+
+
 def _dispatch_my_event_confirmations(user_id):
     """Per-creator opportunistic confirmation dispatcher.
 
@@ -529,10 +591,47 @@ def register():
         username=username,
         password=generate_password_hash(password),
         is_active=True,
+        # Tanda 7E — nace sin verificar; se confirma con el link del email.
+        email_verified=False,
     )
     db.session.add(new_user)
     db.session.commit()
-    return jsonify({"msg": "User registered successfully", "user": new_user.serialize()}), 201
+
+    # Tanda 7E — email de confirmación (best-effort: si el SMTP no está
+    # configurado o falla, el registro NO se rompe; el front informa).
+    email_sent = False
+    if mail_configured():
+        token = _make_email_token(new_user.id, EMAIL_VERIFY_SALT)
+        # El link apunta al BACKEND, que valida y redirige al login del
+        # frontend con ?verified=1|0 (un email no puede hacer fetch).
+        verify_url = "{}/api/verify-email/{}".format(
+            request.url_root.rstrip("/").replace("http://", "https://"), token)
+        email_sent = bool(send_verification_email(new_user, verify_url))
+
+    return jsonify({
+        "msg": "User registered successfully",
+        "user": new_user.serialize(),
+        "verification_email_sent": email_sent,
+    }), 201
+
+
+# Tanda 7E — el usuario clica el link del email: validamos el token y
+# redirigimos al login del frontend con el resultado en la query string.
+@api.route('/verify-email/<token>', methods=['GET'])
+def verify_email(token):
+    front = frontend_base_url()
+    user_id = _read_email_token(token, EMAIL_VERIFY_SALT, EMAIL_VERIFY_MAX_AGE)
+    if not user_id:
+        return redirect("{}/login?verified=0".format(front))
+
+    user = db.session.get(User, user_id)
+    if not user:
+        return redirect("{}/login?verified=0".format(front))
+
+    if not user.email_verified:
+        user.email_verified = True
+        db.session.commit()
+    return redirect("{}/login?verified=1".format(front))
 
 
 # =========================================================
@@ -665,15 +764,26 @@ def upload_media():
 
 
 # =========================================================
-# RESET PASSWORD (MVP — direct, no email/token)
+# PASSWORD RECOVERY — Tanda 7E (email-link flow)
 # =========================================================
-# Intentionally simple for the MVP: identify by email OR username and set a
-# new password immediately. This is NOT secure (anyone who knows a username
-# can change its password) and is meant to be replaced by an email-link flow
-# once a real sender domain is available.
+# Sustituye al antiguo POST /reset-password "directo", que permitía a
+# CUALQUIERA cambiar la contraseña de un usuario sabiendo su username
+# (compromiso MVP documentado). Ahora son dos pasos:
+#
+#   1. POST /password-recovery {identifier}
+#        → si la cuenta existe, envía un email con un link firmado
+#          (caducidad 1 h). SIEMPRE responde 200 con el mismo mensaje
+#          para no revelar qué emails/usernames existen (anti-enumeración).
+#   2. POST /password-reset-confirm {token, password}
+#        → valida el token y guarda la nueva contraseña.
 
-@api.route('/reset-password', methods=['POST'])
-def reset_password():
+@api.route('/password-recovery', methods=['POST'])
+def password_recovery():
+    if not mail_configured():
+        return jsonify({
+            "msg": "Password recovery by email is not configured on this server"
+        }), 503
+
     body = request.get_json() or {}
     identifier = (
         body.get("identifier")
@@ -681,21 +791,56 @@ def reset_password():
         or body.get("username")
         or ""
     ).strip()
-    password = body.get("password") or ""
-
-    if not identifier or not password:
-        return jsonify({"msg": "Email/username and new password are required"}), 400
-    if len(password) < 6:
-        return jsonify({"msg": "Password must be at least 6 characters"}), 400
+    if not identifier:
+        return jsonify({"msg": "Email or username is required"}), 400
 
     lowered = identifier.lower()
     user = User.query.filter(
         or_(User.email == lowered, User.username == identifier)
     ).first()
+
+    if user:
+        token = _make_email_token(user.id, PASSWORD_RESET_SALT)
+        # Tanda 7H — token por QUERY STRING, no por path: los tokens de
+        # itsdangerous llevan puntos y el dev-server de Vite trata todo
+        # path cuyo último segmento contiene "." como un fichero (no
+        # aplica el fallback SPA) → 404 al abrir el link del email.
+        # La query string no afecta al fallback en ningún servidor.
+        reset_url = "{}/reset-password?token={}".format(
+            frontend_base_url(), token)
+        send_password_reset_email(user, reset_url)
+
+    # Mismo 200 exista o no la cuenta — anti user-enumeration.
+    return jsonify({
+        "msg": "If that account exists, we've sent a reset link to its email."
+    }), 200
+
+
+@api.route('/password-reset-confirm', methods=['POST'])
+def password_reset_confirm():
+    body = request.get_json() or {}
+    token = body.get("token") or ""
+    password = body.get("password") or ""
+
+    if not token or not password:
+        return jsonify({"msg": "Token and new password are required"}), 400
+    if not isinstance(password, str) or len(password) < 6:
+        return jsonify({"msg": "Password must be at least 6 characters"}), 400
+
+    user_id = _read_email_token(
+        token, PASSWORD_RESET_SALT, PASSWORD_RESET_MAX_AGE)
+    if not user_id:
+        return jsonify({
+            "msg": "This reset link is invalid or has expired. Request a new one."
+        }), 400
+
+    user = db.session.get(User, user_id)
     if not user:
-        return jsonify({"msg": "No account found with that email or username"}), 404
+        return jsonify({"msg": "Account no longer exists"}), 404
 
     user.password = generate_password_hash(password)
+    # De paso: si llegó al email, el email es suyo — lo marcamos verificado.
+    user.email_verified = True
     db.session.commit()
     return jsonify({"msg": "Password updated. You can now log in."}), 200
 
@@ -803,6 +948,7 @@ def create_event():
         )
 
     db.session.commit()
+    _emit_event_ping(event, "created")
     return jsonify({"msg": "Event created", "event": event.serialize(current_user_id=current_user_id)}), 201
 
 
@@ -955,6 +1101,7 @@ def update_event(event_id):
         )
 
     db.session.commit()
+    _emit_event_ping(event, "updated")
     return jsonify({"msg": "Event updated", "event": event.serialize(current_user_id=current_user_id)}), 200
 
 
@@ -1026,6 +1173,8 @@ def invite_to_event(event_id):
         existing_inv_ids.add(target_id)
 
     db.session.commit()
+    if created:
+        _emit_event_ping(event, "invited")
     return jsonify({
         "msg": f"{len(created)} invitation(s) sent",
         "invitations": created,
@@ -1071,6 +1220,7 @@ def respond_event(event_id):
                 event_id, user_id=current_user_id)
             _notify_rsvp_changed(event, responder, "not_going")
             db.session.commit()
+            _emit_event_ping(event, "rsvp")
             return jsonify({
                 "msg": "Invitation declined",
                 "event": event.serialize(current_user_id=current_user_id),
@@ -1089,6 +1239,7 @@ def respond_event(event_id):
         )
         _notify_rsvp_changed(event, responder, response)
         db.session.commit()
+        _emit_event_ping(event, "rsvp")
         return jsonify({
             "msg": "Invitation accepted",
             "event": event.serialize(current_user_id=current_user_id),
@@ -1118,6 +1269,8 @@ def respond_event(event_id):
         if previous_rsvp != response:
             _notify_rsvp_changed(event, responder, response)
         db.session.commit()
+        if previous_rsvp != response:
+            _emit_event_ping(event, "rsvp")
         return jsonify({
             "msg": "RSVP updated" if previous_rsvp != response else "RSVP unchanged",
             "event": event.serialize(current_user_id=current_user_id),
@@ -1161,6 +1314,8 @@ def rsvp_event(event_id):
     if previous_rsvp != rsvp:
         _notify_rsvp_changed(event, responder, rsvp)
     db.session.commit()
+    if previous_rsvp != rsvp:
+        _emit_event_ping(event, "rsvp")
     return jsonify({
         "msg": "RSVP updated" if previous_rsvp != rsvp else "RSVP unchanged",
         "event": event.serialize(current_user_id=current_user_id),
@@ -1194,6 +1349,7 @@ def accept_event_invitation(event_id):
     )
     _notify_rsvp_changed(event, user, "going")
     db.session.commit()
+    _emit_event_ping(event, "rsvp")
     return jsonify({"msg": "Invitation accepted", "event": event.serialize(current_user_id=current_user_id)}), 200
 
 
@@ -1216,6 +1372,7 @@ def refuse_event_invitation(event_id):
     _mark_event_invite_notifications_read(event_id, user_id=current_user_id)
     _notify_rsvp_changed(event, responder, "not_going")
     db.session.commit()
+    _emit_event_ping(event, "rsvp")
     return jsonify({"msg": "Invitation refused"}), 200
 
 
@@ -1244,6 +1401,7 @@ def leave_event(event_id):
     # Tell the creator someone left — semantically a "rsvp_changed → not_going".
     _notify_rsvp_changed(event, target, "not_going")
     db.session.commit()
+    _emit_event_ping(event, "left")
     return jsonify({"msg": "Left event", "event_id": event_id}), 200
 
 
@@ -1268,6 +1426,10 @@ def delete_event(event_id):
             "msg": "Past events cannot be deleted. Please confirm whether "
                    "the event took place from your notifications instead."
         }), 409
+
+    # Tanda 7F2 — capturar la audiencia ANTES de vaciar participantes y
+    # borrar la fila: después ya no se puede calcular.
+    audience = _event_audience_ids(event)
 
     creator = db.session.get(User, current_user_id)
 
@@ -1304,6 +1466,7 @@ def delete_event(event_id):
 
     db.session.delete(event)
     db.session.commit()
+    _emit_event_ping(audience, "deleted", event_id=event_id)
     return jsonify({"msg": "Event deleted"}), 200
 
 
@@ -1351,6 +1514,9 @@ def confirm_event(event_id):
             n.is_read = True
 
     db.session.commit()
+    # Tanda 7F2 — clave cuando happened == False: el evento desaparece de
+    # la UI de TODOS (get_events lo filtra) → sus mapas deben refrescar.
+    _emit_event_ping(event, "confirmed")
     return jsonify({
         "msg": "Event confirmed" if happened else "Event marked as not happened",
         "event": event.serialize(current_user_id),
@@ -1398,6 +1564,10 @@ def remove_participant(event_id, user_id):
                 },
             )
         db.session.commit()
+        # El expulsado ya no está en la audiencia — ping aparte para él.
+        _emit_event_ping(event, "removed")
+        emit_to_user(user_id, "event:changed",
+                     {"event_id": event.id, "action": "removed"})
         return jsonify({"msg": "Participant removed", "event": event.serialize(current_user_id=current_user_id)}), 200
 
     # Pending invitee?
@@ -1418,6 +1588,9 @@ def remove_participant(event_id, user_id):
                 },
             )
         db.session.commit()
+        _emit_event_ping(event, "removed")
+        emit_to_user(user_id, "event:changed",
+                     {"event_id": event.id, "action": "removed"})
         return jsonify({"msg": "Invitation cancelled", "event": event.serialize(current_user_id=current_user_id)}), 200
 
     return jsonify({"msg": "User is not a participant nor invited"}), 404
@@ -1660,6 +1833,9 @@ def approve_suggestion(event_id, suggestion_id):
 
     inv = _approve_suggestion_internal(event, sug)
     db.session.commit()
+    # Tanda 7F2 — el sugerido ahora tiene invitación pendiente: su mapa
+    # (filtro "Invited") y el badge del creador deben refrescar.
+    _emit_event_ping(event, "invited")
     return jsonify({
         "msg": "Suggestion approved",
         "invitation": inv.serialize() if inv else None,
@@ -1732,6 +1908,8 @@ def approve_all_suggestions(event_id):
             converted.append(inv.serialize())
 
     db.session.commit()
+    if converted:
+        _emit_event_ping(event, "invited")
     return jsonify({
         "msg": f"{len(converted)} suggestion(s) approved",
         "invitations": converted,

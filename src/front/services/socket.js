@@ -42,3 +42,20 @@ export const disconnectSocket = () => {
     socket = null;
   }
 };
+
+// ─────────────────────────────────────────────────────────────
+// Tanda 7F2 — evento DOM local "los eventos cambiaron".
+//
+// Complemento del ping "event:changed" del socket: cuando ESTE mismo
+// navegador crea/edita un evento desde un modal que no vive en el mapa
+// (p. ej. el "+" del pill nav, cuyo EventModal está en ButtonNavbar),
+// se dispara este evento de window y Mapview refetchea al instante —
+// garantizado incluso si el socket está caído. Mismo patrón
+// bump-and-listen que SHOW_PROFILE_EVENT / SHOW_ONBOARDING_EVENT.
+export const EVENTS_CHANGED_EVENT = "sq:events-changed";
+
+export const announceEventsChanged = () => {
+  try {
+    window.dispatchEvent(new Event(EVENTS_CHANGED_EVENT));
+  } catch (_) { /* SSR/tests: sin window, sin problema */ }
+};

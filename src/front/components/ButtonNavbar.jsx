@@ -28,6 +28,9 @@ import useGlobalReducer from "../hooks/useGlobalReducer";
 // Tanda 7D — señal de sesión basada en el user persistido (el JWT vive
 // en una cookie httpOnly).
 import { isLoggedIn } from "../services/auth";
+// Tanda 7F2 — aviso local "los eventos cambiaron" para que Mapview
+// refetchee al crear desde el "+" del pill.
+import { announceEventsChanged } from "../services/socket";
 
 // Tanda 7A — Swap con el Navbar: el acceso a "My Profile" se movió al
 // hamburger menu del Navbar y el pill de aquí abajo pasa a llevar a
@@ -844,7 +847,12 @@ export const BottomNavbar = () => {
         prefillCoords={null}
         currentUser={JSON.parse(localStorage.getItem("user") || "null")}
         onSaved={() => {
-          // refresh whatever needs refreshing (map, store, etc.)
+          // Tanda 7F2 — este callback estaba VACÍO: crear un evento desde
+          // el "+" del pill no refrescaba el mapa (Mapview solo refetchea
+          // con su propio modal). Ahora avisamos vía evento DOM local y
+          // Mapview refetchea al instante — y el resto de afectados
+          // recibe el ping "event:changed" por socket desde el backend.
+          announceEventsChanged();
         }}
       />
     </>

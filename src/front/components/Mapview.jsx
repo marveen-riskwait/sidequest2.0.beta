@@ -20,6 +20,10 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import useGlobalReducer from "../hooks/useGlobalReducer";
 import { createMarkerAvatarElement } from "./MarkerAvatar";
 import { EventModal } from "./EventModal";
+// Tanda 7F2 — el mapa se refresca en tiempo real: ping "event:changed"
+// del socket (cambios de cualquier usuario afectado) + evento DOM local
+// (cambios hechos en este navegador desde modales fuera del mapa).
+import { getSocket, EVENTS_CHANGED_EVENT } from "../services/socket";
 import "./mapview.css";
 
 const MAP_STYLE = "https://tiles.openfreemap.org/styles/liberty";
@@ -231,6 +235,15 @@ export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
   const currentUser = JSON.parse(localStorage.getItem("user") || "null");
   const myId = currentUser?.id ?? null;
 
+  // Tanda 7H — flag de vida del componente para cancelar los reintentos
+  // de fetchEvents al desmontar, + tope de reintentos.
+  const MAX_FETCH_RETRIES = 4;
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => { aliveRef.current = false; };
+  }, []);
+
   const fetchEvents = async () => {
     const apiUrl = import.meta.env.VITE_BACKEND_URL;
     if (!apiUrl) {
@@ -241,18 +254,24 @@ export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
     setLoading(true);
     setError(null);
 
+    // Tanda 7H — retry con TOPE y cancelable (antes: for(;;) infinito
+    // sin flag de desmontaje — con el backend caído seguía reintentando
+    // y haciendo setState sobre un componente muerto para siempre).
     let delay = 400;
-    for (; ;) {
+    for (let attempt = 0; attempt <= MAX_FETCH_RETRIES; attempt++) {
+      if (!aliveRef.current) return; // desmontado → abandonar en silencio
       try {
         // Tanda 7D — la autenticación viaja en la cookie httpOnly que
         // añade el parche global de fetch (services/auth.js).
         const res = await fetch(`${apiUrl}/api/events`);
+        if (!aliveRef.current) return;
         if (!res.ok) {
           setError(`Failed to fetch events (${res.status})`);
           setLoading(false);
           return;
         }
         const data = await res.json();
+        if (!aliveRef.current) return;
         const normalized = data
           .filter((e) => e.latitude != null && e.longitude != null)
           .map((e) => ({ ...e, position: [e.latitude, e.longitude] }));
@@ -263,6 +282,12 @@ export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
         await new Promise((r) => setTimeout(r, delay));
         delay = Math.min(delay * 2, 4000);
       }
+    }
+    // Reintentos agotados: NO se vacía nada — los markers que ya estaban
+    // siguen en pantalla; el socket o el próximo aviso reintentarán.
+    if (aliveRef.current) {
+      setLoading(false);
+      setError("Could not reach the server — showing the last loaded events.");
     }
   };
 
@@ -410,6 +435,27 @@ export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
     recenterOnUser();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recenterMapNonce]);
+
+  // ── EFFECT (Tanda 7F2): refresco en tiempo real de los eventos ──
+  // 1. "event:changed" (socket): el backend lo emite a la audiencia del
+  //    evento (creador, participantes, invitados, amigos si es público)
+  //    al crear/editar/borrar/responder/confirmar → refetch inmediato.
+  // 2. EVENTS_CHANGED_EVENT (window): disparado por modales locales que
+  //    no viven en el mapa (el "+" del pill nav) → el evento recién
+  //    creado aparece al instante aunque el socket esté caído.
+  useEffect(() => {
+    const refresh = () => fetchEvents();
+
+    window.addEventListener(EVENTS_CHANGED_EVENT, refresh);
+    const socket = getSocket();
+    if (socket) socket.on("event:changed", refresh);
+
+    return () => {
+      window.removeEventListener(EVENTS_CHANGED_EVENT, refresh);
+      if (socket) socket.off("event:changed", refresh);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Combined filter pipeline. `forceShowEventId` always wins so the deep-link
   // ?event=<id> can never be hidden by the navbar filters.
