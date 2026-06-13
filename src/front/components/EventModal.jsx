@@ -689,6 +689,45 @@ export const EventModal = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [show, eventId]);
 
+  // Tanda 7X4 — Auto-geocodificar la dirección al abrir desde Discover.
+  // Los eventos de HasData/Google Events llegan CON dirección textual
+  // pero SIN coordenadas → sin esto el pin caería en (0,0)/el mar.
+  // En vez de pedir al usuario que reescriba la dirección, al abrir
+  // lanzamos el MISMO autocompletado que usa al teclear y
+  // autoseleccionamos la primera sugerencia (el pin cae solo en el
+  // sitio). Si hay varias coincidencias dejamos el desplegable abierto
+  // para que pueda elegir otra sede. Solo aplica en modo creación y
+  // cuando hay dirección pero NO coordenadas (los demás proveedores ya
+  // las traen).
+  useEffect(() => {
+    if (!show || isEditMode) return;
+    const loc = prefillEvent?.location;
+    const hasCoords =
+      prefillCoords?.latitude != null && prefillCoords?.longitude != null;
+    if (!loc || hasCoords) return;
+
+    let cancelled = false;
+    (async () => {
+      const results = await searchAddress(loc);
+      if (cancelled || !results.length) return;
+      const first = results[0];
+      setForm((f) => ({
+        ...f,
+        location:  first.label,
+        latitude:  first.lat,
+        longitude: first.lng,
+      }));
+      // Una sola coincidencia → la damos por buena en silencio.
+      // Varias → mostramos el desplegable para que el usuario elija.
+      if (results.length > 1) {
+        setAddressSuggestions(results);
+        setShowAddressDropdown(true);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [show, eventId]);
+
   // Cancel a pending location search when the modal closes so an in-flight
   // request can't pop the dropdown after the user already left.
   useEffect(() => {

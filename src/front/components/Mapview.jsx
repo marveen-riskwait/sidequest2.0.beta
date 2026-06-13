@@ -95,6 +95,31 @@ const isTouchDevice = () =>
   typeof window.matchMedia === "function" &&
   window.matchMedia("(hover: none)").matches;
 
+// Tanda 7X4 — forward-geocode ligero (Nominatim, mismo proveedor que
+// EventModal/DiscoverPanel) para las cards de Discover SIN coordenadas
+// (HasData/Google Events). Con caché en memoria: clicar la misma card
+// varias veces no repega a Nominatim.
+const _geocodeCache = {};
+const geocodeAddress = async (query) => {
+  const key = query.trim().toLowerCase();
+  if (key in _geocodeCache) return _geocodeCache[key];
+  try {
+    const params = new URLSearchParams({ format: "json", q: query.trim(), limit: "1" });
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?${params.toString()}`,
+      { headers: { Accept: "application/json" } }
+    );
+    const arr = res.ok ? await res.json() : [];
+    const hit = Array.isArray(arr) && arr[0]
+      ? { lat: parseFloat(arr[0].lat), lng: parseFloat(arr[0].lon) }
+      : null;
+    _geocodeCache[key] = hit;
+    return hit;
+  } catch {
+    return null;
+  }
+};
+
 // Selectores que indican que hay un overlay de Bootstrap abierto.
 // Usado para suprimir el map-click cuando el usuario hace clic en el
 // mapa para cerrar uno de estos overlays.
@@ -687,16 +712,12 @@ export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
     }
   };
 
-  // Click en una card del panel → flyTo + marcador ámbar temporal.
-  const handleDiscoverPreview = (ev) => {
-    if (ev?.latitude == null || ev?.longitude == null || !mapRef.current) return;
+  // flyTo + marcador ámbar temporal en unas coordenadas dadas.
+  const placePreviewAt = (lat, lng) => {
+    if (!mapRef.current) return;
     setFollowUser(false);
     isProgrammaticMoveRef.current = true;
-    mapRef.current.flyTo({
-      center: [ev.longitude, ev.latitude],
-      zoom: 14,
-      duration: 800,
-    });
+    mapRef.current.flyTo({ center: [lng, lat], zoom: 14, duration: 800 });
     setTimeout(() => { isProgrammaticMoveRef.current = false; }, 900);
 
     clearPreviewMarker();
@@ -708,7 +729,23 @@ export const Mapview = ({ onMapClick, onMarkerClick, onSaved }) => {
     previewMarkerRef.current = new maplibregl.Marker({
       element: host.firstElementChild,
       anchor: "center",
-    }).setLngLat([ev.longitude, ev.latitude]).addTo(mapRef.current);
+    }).setLngLat([lng, lat]).addTo(mapRef.current);
+  };
+
+  // Click en una card del panel → flyTo + marcador ámbar temporal.
+  // Tanda 7X4 — si el evento trae coordenadas (Ticketmaster/PredictHQ)
+  // las usamos directas; si NO (HasData/Google Events), geocodificamos
+  // su dirección al vuelo para que la card también ponga el marcador.
+  const handleDiscoverPreview = async (ev) => {
+    if (!mapRef.current) return;
+    if (ev?.latitude != null && ev?.longitude != null) {
+      placePreviewAt(ev.latitude, ev.longitude);
+      return;
+    }
+    const query = (ev?.location || ev?.venue_name || "").trim();
+    if (query.length < 3) return; // sin dirección usable, no hay marcador
+    const hit = await geocodeAddress(query);
+    if (hit) placePreviewAt(hit.lat, hit.lng);
   };
 
   const handleDiscoverClose = () => {

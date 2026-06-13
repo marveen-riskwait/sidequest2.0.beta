@@ -30,6 +30,7 @@ import { api } from "../services/api";
 const PANEL_CSS = `
 .sq-discover-panel {
   position: absolute;
+  /* Preferencia del usuario: panel anclado a la IZQUIERDA. */
   top: 12px; left: 12px; bottom: 12px;
   width: min(400px, calc(100vw - 24px));
   z-index: 1035;                      /* sobre el mapa, bajo modales (1050) */
@@ -191,15 +192,22 @@ const geocodeCity = async (name) => {
   }
 };
 
-const reverseCountry = async (lat, lng) => {
+// Tanda 7X3 — además del país, el NOMBRE de la ciudad: lo necesita
+// HasData/Google Events (búsqueda textual "events in <place>") en modo
+// near-me, donde no hay ciudad tecleada. zoom=10 para acertar la ciudad.
+const reverseGeo = async (lat, lng) => {
   try {
     const res = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=json&zoom=3&lat=${lat}&lon=${lng}`
+      `https://nominatim.openstreetmap.org/reverse?format=json&zoom=10&lat=${lat}&lon=${lng}`
     );
     const data = await res.json();
-    return (data?.address?.country_code || "").toUpperCase() || null;
+    const a = data?.address || {};
+    return {
+      country: (a.country_code || "").toUpperCase() || null,
+      place: a.city || a.town || a.village || a.municipality || a.state || null,
+    };
   } catch {
-    return null;
+    return { country: null, place: null };
   }
 };
 
@@ -229,7 +237,7 @@ export const DiscoverPanel = ({
   // Tanda 7X2 — cachés de geocodificación (una llamada a Nominatim por
   // ciudad/posición, no una por búsqueda).
   const cityGeoCacheRef = useRef({});
-  const nearCountryRef = useRef(null);
+  const nearGeoRef = useRef(null);
 
   // Tanda 7X2 — mientras el panel está abierto, ocultamos la pill nav
   // (mismo patrón que body.modal-open de los modales Bootstrap).
@@ -245,16 +253,19 @@ export const DiscoverPanel = ({
       if (!cityGeoCacheRef.current[key]) {
         cityGeoCacheRef.current[key] = await geocodeCity(city.trim());
       }
-      return cityGeoCacheRef.current[key]; // {lat,lng,country} | null
+      const g = cityGeoCacheRef.current[key];
+      // place = lo tecleado (HasData busca "events in <ciudad>").
+      return g ? { ...g, place: city.trim() } : { place: city.trim() };
     }
     if (userCenter) {
-      if (!nearCountryRef.current) {
-        nearCountryRef.current = await reverseCountry(userCenter[0], userCenter[1]);
+      if (!nearGeoRef.current) {
+        nearGeoRef.current = await reverseGeo(userCenter[0], userCenter[1]);
       }
       return {
         lat: userCenter[0],
         lng: userCenter[1],
-        country: nearCountryRef.current,
+        country: nearGeoRef.current?.country || null,
+        place: nearGeoRef.current?.place || null,
       };
     }
     return null;
@@ -277,6 +288,7 @@ export const DiscoverPanel = ({
       p.set("radius", radius || 40);
     }
     if (geo?.country) p.set("country", geo.country);
+    if (geo?.place) p.set("place", geo.place);   // HasData/Google Events
     if (q.trim()) p.set("q", q.trim());
     if (category) p.set("category", category);
     if (dateFrom) p.set("start", dateFrom);

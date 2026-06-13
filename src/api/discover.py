@@ -430,6 +430,160 @@ def _fetch_predicthq(filters):
     return events, data.get("count") or len(events)
 
 
+# ── Adaptador: HasData Google Events (cobertura de cola larga) ──────
+# Google Events agrega lo que ninguna API directa tiene: eventos de
+# Facebook públicos, salas, ayuntamientos, Meetup, RA/Dice/Fever cuando
+# Google los indexa. Es la capa de MAYOR cobertura. Se activa con
+# HASDATA_API_KEY.
+#
+# Particularidades que el normalizador absorbe:
+#   - Fechas TEXTUALES sin año ("Sat, Jul 4, 8 – 11 PM") → _parse_google_date
+#     deduce año (futuro) y hora; si no puede, deja la fecha vacía
+#     (editable en el modal).
+#   - SIN lat/lng → las cards no harán flyTo, pero al crear el quest el
+#     EventModal geocodifica la dirección igual que un evento manual.
+#   - Dirección con el venue mezclado → se separa (mismo criterio v18).
+#   - Es TEXTUAL: necesita un nombre de sitio (`place`); en near-me el
+#     frontend lo resuelve por reverse-geocoding.
+HASDATA_GEVENTS_URL = "https://api.hasdata.com/scrape/google/events"
+
+_MONTHS = {m: i for i, m in enumerate(
+    ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug",
+     "sep", "oct", "nov", "dec"], 1)}
+
+# query word por categoría (Google Events filtra por texto, no por enum)
+HASDATA_CATEGORY_Q = {
+    "music":  "concerts",
+    "sports": "sports events",
+    "arts":   "theatre",
+    "film":   "film screenings",
+    "misc":   "events",
+}
+
+
+def _parse_google_date(date_obj):
+    """('YYYY-MM-DD'|None, 'HH:MM'|None) desde el bloque de fecha textual
+    de Google Events. Asume año actual; si la fecha caería >30 días en el
+    pasado, rueda al año siguiente (los eventos miran al futuro)."""
+    import re
+    if not date_obj:
+        return None, None
+    if isinstance(date_obj, dict):
+        start = (date_obj.get("startDate") or date_obj.get("start_date") or "")
+        when = (date_obj.get("when") or "")
+    else:
+        start = when = str(date_obj)
+    text = "{} {}".format(start, when)
+
+    date_iso = None
+    m = re.search(
+        r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+(\d{1,2})",
+        text, re.I)
+    if m:
+        month = _MONTHS[m.group(1).lower()[:3]]
+        day = int(m.group(2))
+        today = dt.date.today()
+        try:
+            cand = dt.date(today.year, month, day)
+            if cand < today - dt.timedelta(days=30):
+                cand = dt.date(today.year + 1, month, day)
+            date_iso = cand.isoformat()
+        except ValueError:
+            date_iso = None
+
+    time_hhmm = None
+    tm = re.search(r"(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\.?", when, re.I)
+    if tm:
+        hour = int(tm.group(1))
+        minute = int(tm.group(2) or 0)
+        if tm.group(3).lower() == "p" and hour != 12:
+            hour += 12
+        if tm.group(3).lower() == "a" and hour == 12:
+            hour = 0
+        time_hhmm = "{:02d}:{:02d}".format(hour, minute)
+    else:
+        tm24 = re.search(r"\b([01]?\d|2[0-3]):([0-5]\d)\b", when)
+        if tm24:
+            time_hhmm = "{:02d}:{:02d}".format(
+                int(tm24.group(1)), int(tm24.group(2)))
+    return date_iso, time_hhmm
+
+
+def _hd_get(d, *keys):
+    """Primer valor no-nulo entre varias claves — HasData mezcla
+    camelCase y snake_case según el endpoint."""
+    for k in keys:
+        if isinstance(d, dict) and d.get(k) is not None:
+            return d[k]
+    return None
+
+
+def _hd_normalize(ev):
+    venue = _hd_get(ev, "venue") or {}
+    venue_name = venue.get("name") if isinstance(venue, dict) else None
+
+    address = _hd_get(ev, "address") or []
+    if isinstance(address, str):
+        address = [address]
+    # Quita el venue del primer segmento para no romper el geocoder.
+    loc_parts = list(address)
+    if venue_name and loc_parts and venue_name.lower() in (loc_parts[0] or "").lower():
+        loc_parts[0] = (loc_parts[0].replace(venue_name, "").strip(" ,")) or None
+    location = _join_address(loc_parts)
+
+    date_iso, time_hhmm = _parse_google_date(_hd_get(ev, "date"))
+
+    return {
+        "id":          "hd_{}".format(abs(hash(
+            (ev.get("title"), str(_hd_get(ev, "date")), _hd_get(ev, "link"))
+        )) % 10**12),
+        "source":      "google",
+        "title":       ev.get("title"),
+        "description": _hd_get(ev, "description"),
+        "date":        date_iso,
+        "time":        time_hhmm,
+        "venue_name":  venue_name or (loc_parts[0] if loc_parts else None),
+        "location":    location,
+        "latitude":    None,
+        "longitude":   None,
+        "price_min":   None,
+        "price_max":   None,
+        "currency":    None,
+        "category":    None,
+        "url":         _hd_get(ev, "link", "ticketLink"),
+        "image":       _hd_get(ev, "thumbnail", "image"),
+    }
+
+
+def _fetch_hasdata(filters):
+    place = filters.get("place") or filters.get("city")
+    if not place:
+        # Google Events es textual: sin nombre de sitio no hay búsqueda.
+        return [], 0
+
+    cat_word = HASDATA_CATEGORY_Q.get(filters.get("category"), "events")
+    query = "{} in {}".format(cat_word, place)
+    if filters.get("q"):
+        query = "{} {}".format(filters["q"], query)
+
+    params = {
+        "q": query,
+        # Google pagina por offset en múltiplos de 10.
+        "start": filters["page"] * 10,
+    }
+    r = requests.get(HASDATA_GEVENTS_URL, params=params, timeout=12, headers={
+        "x-api-key": os.getenv("HASDATA_API_KEY"),
+        "Accept": "application/json",
+    })
+    r.raise_for_status()
+    data = r.json() or {}
+
+    raw = (data.get("eventsResults") or data.get("events_results")
+           or data.get("events") or [])
+    events = [_hd_normalize(e) for e in raw if e.get("title")]
+    return events, len(events)
+
+
 # Registro de proveedores: (nombre, fetch, está_configurado).
 # Para añadir uno: escribir su _fetch_* (mismo contrato) y sumarlo aquí.
 #
@@ -442,6 +596,8 @@ PROVIDERS = [
      lambda: bool(os.getenv("TICKETMASTER_API_KEY"))),
     ("predicthq", _fetch_predicthq,
      lambda: bool(os.getenv("PREDICTHQ_TOKEN"))),
+    ("google", _fetch_hasdata,
+     lambda: bool(os.getenv("HASDATA_API_KEY"))),
     ("nager", _fetch_nager,
      lambda: True),  # gratis y sin key — siempre activo
     ("calendarific", _fetch_calendarific,
@@ -489,6 +645,10 @@ def discover_events():
         # ISO-3166 alpha-2 ("ES", "FR"…) — lo resuelve el frontend
         # geocodificando la búsqueda; lo usan los proveedores de festivos.
         "country":  _f("country"),
+        # Nombre de sitio legible ("Madrid", "Esch-sur-Alzette") — en
+        # modo ciudad = lo tecleado; en near-me = reverse-geocoded.
+        # Lo usa HasData/Google Events (búsqueda textual).
+        "place":    _f("place"),
         "page":     _f("page", int) or 0,
         "size":     20,
     }
